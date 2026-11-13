@@ -2600,7 +2600,7 @@ pub(crate) fn show_pins(
             .collect()
     };
     host.open(
-        pins::canvas_surface(screen),
+        pins::canvas_surface(screen, source.as_deref()),
         canvas,
         OpenOptions {
             uncapped: false,
@@ -2618,12 +2618,13 @@ pub(crate) fn show_pins(
     Ok(())
 }
 
-/// The layer the capture overlay lives on: every edge, its own keyboard, no room reserved.
-pub(crate) fn overlay_surface() -> SurfaceSpec {
+/// The layer the capture overlay lives on: the captured output, every edge, its own keyboard.
+pub(crate) fn overlay_surface(output: Option<&str>) -> SurfaceSpec {
     SurfaceSpec::layer(
         "dev.crabsnap",
         "crabsnap-overlay",
         LayerSpec {
+            output: output.map(str::to_owned),
             level: Layer::Overlay,
             anchor: Anchor::ALL,
             size: None,
@@ -2689,6 +2690,8 @@ fn shoot_region(
         .chords(crabsnap_core::hotkeys::Place::Overlay);
     let pin_chords = settings.shortcuts.chords(crabsnap_core::hotkeys::Place::Pin);
     let mut host = Host::new(Box::new(backend));
+    // Built before `source` moves into the overlay: the surface must name the captured output.
+    let surface = overlay_surface(source.as_deref());
     let mut overlay = Overlay::new(
         image,
         source,
@@ -2701,7 +2704,7 @@ fn shoot_region(
     overlay.settled = demo.then_some(demo_rect);
 
     host.open(
-        overlay_surface(),
+        surface,
         overlay,
         OpenOptions {
             uncapped: false,

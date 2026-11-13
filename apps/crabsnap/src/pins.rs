@@ -45,12 +45,16 @@ pub(crate) fn cascade_at(screen: (u32, u32), size: (f32, f32), index: usize) -> 
     )
 }
 
-/// The layer a canvas lives on: its output's size, keyboard following the pin under the pointer.
-pub(crate) fn canvas_surface(screen: (u32, u32)) -> SurfaceSpec {
+/// The layer a canvas lives on: its output, keyboard following the pin under the pointer.
+///
+/// The output's name is not decoration: a canvas sized for one monitor but opened on another
+/// would put its pins where the user is not looking.
+pub(crate) fn canvas_surface(screen: (u32, u32), output: Option<&str>) -> SurfaceSpec {
     SurfaceSpec::layer(
         "dev.crabsnap",
         "crabsnap-pins",
         LayerSpec {
+            output: output.map(str::to_owned),
             level: Layer::Overlay,
             anchor: Anchor {
                 top: true,
@@ -342,7 +346,7 @@ pub(crate) fn place(
             .texture_entry()
     };
     let surface = cx.open(
-        canvas_surface(screen),
+        canvas_surface(screen, Some(output.as_str())),
         Box::new(canvas),
         OpenOptions {
             uncapped: false,

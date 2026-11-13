@@ -244,8 +244,11 @@ which window held the keyboard as the pointer arrived, and returns it when the
 pointer leaves, since the shell refuses a foreground change from a process that
 does not already hold it. Hover alone cannot take the keyboard — Windows has no
 focus-follows-pointer contract — so the pointer decides only who gets it back.
-`ExclusiveZone::Reserve` is ignored, and every layer lands on the primary
-monitor: the portable spec names no output.
+A layer's `output` names the monitor it belongs on, as the name
+`Backend::outputs` reports it, and an empty or unknown name lands on the primary
+one. `ExclusiveZone::Reserve` is still ignored: its Windows counterpart is an
+appbar registration, which moves the work area of the whole monitor, and no
+surface of this app asks to reserve anything.
 
 The engine publishes the frame's consumed areas through `set_input_region`, and
 the shaped window takes a hit test only inside them, which is what lets a
@@ -988,6 +991,18 @@ foreign host to the local and UNC paths Windows uses. Caught by
 `a_written_dib_reads_back_as_the_same_picture`, watched red on the missing twelve bytes before
 it passed, `a_copied_path_becomes_a_file_uri`, `a_windows_file_uri_names_a_drive_or_a_share`,
 and three live pins from a DIB-only picture, a copied file and copied text.
+
+**A per-output surface landed on the primary monitor.** The app opens one canvas per output and
+one overlay over the output it just captured, and sized each for that output's rectangle, but the
+portable spec named no output at all, so every layer opened on the primary monitor: a pin taken
+from a second monitor appeared on the first, at coordinates from the wrong screen. `LayerSpec`
+now carries the output's name — the same string `Backend::outputs` reports and the app already
+kept for a pin's source — and `opening_layer` resolves it to a monitor, falling back to the
+primary one for a name no monitor has. The Wayland backend does not act on the name yet, so a
+layer there still lands where the compositor puts it; that half is unverified and unimplemented.
+Caught by `layers`, which now opens a layer naming the enumerated output and one naming
+`\\.\DISPLAY999` and checks both against the monitor's rectangle — a single-monitor machine
+cannot tell the two apart, so the second-monitor case is unobserved here.
 
 **A tilted wheel scrolled nothing on Windows.** Only `WM_MOUSEWHEEL` was translated, so a mouse
 with a horizontal wheel, and the two-finger sideways gesture every precision touchpad sends

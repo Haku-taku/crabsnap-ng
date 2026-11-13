@@ -622,6 +622,8 @@ fn open_overlay(
     cx: &mut MessageCtx<'_>,
 ) -> Result<(), String> {
     let source = frame.output.clone();
+    // Built before `source` moves into the overlay: the surface must name the captured output.
+    let surface = overlay_surface(source.as_deref());
     let image = frame.into_image();
     let (width, height) = (image.width, image.height);
     let pixels = Arc::clone(&image.data);
@@ -635,7 +637,7 @@ fn open_overlay(
         service.jobs.clone(),
     );
     let id = cx.open(
-        overlay_surface(),
+        surface,
         Box::new(overlay),
         OpenOptions {
             uncapped: false,
