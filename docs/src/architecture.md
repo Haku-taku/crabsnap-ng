@@ -38,9 +38,9 @@ not a violation. Dev-dependencies are exempt, which is why `ui-gallery` can be
 portable while its examples use the Wayland backend.
 
 `PLATFORM_BOUND` today: `ui-gpu-egl`, `ui-gpu-d3d11`, `ui-platform-wayland`,
-`ui-demo`. Everything else is `PORTABLE`, including the painter: `ui-gpu-scene`
-decides what to draw, and `ui-paint-gpu` (GL) and `ui-gpu-d3d11` (Windows) are
-its devices behind that trait.
+`ui-platform-win32`, `ui-demo`. Everything else is `PORTABLE`, including the
+painter: `ui-gpu-scene` decides what to draw, and `ui-paint-gpu` (GL) and
+`ui-gpu-d3d11` (Windows) are its devices behind that trait.
 
 ## Conventions that no test enforces
 
@@ -64,9 +64,10 @@ These are real rules, enforced by review rather than by cargo:
 
 - **Presentation** has a CPU path (`ui-paint`) and a GPU path (`ui-gpu-scene`
   driving a device: `ui-paint-gpu`'s GL device onto a target from `ui-gpu-egl`,
-  or `ui-gpu-d3d11` offscreen on Windows). The Wayland backend selects the GPU
-  path with its `gpu` feature; without it, it presents through shared memory.
-  See [Rendering Backends](./rendering-backends.md).
+  or `ui-gpu-d3d11`, offscreen or behind `ui-platform-win32`'s swap chain). The
+  Wayland backend selects the GPU path with its `gpu` feature; without it, it
+  presents through shared memory. See
+  [Rendering Backends](./rendering-backends.md).
 - **Text** is split between the contract (`ui-text`: font stacks, shaping
   output, fallback) and a provider crate (`ui-text-fontique`). The system font
   stack is the provider's `system` feature, off by default so unit tests do not
@@ -89,6 +90,7 @@ These are real rules, enforced by review rather than by cargo:
 | An EGL, gbm, or dma-buf detail | `ui-gpu-egl` |
 | Window, surface, frame loop, presentation target | `ui-platform` |
 | Wayland protocol or buffer handling | `ui-platform-wayland` |
+| A Win32 window, message pump, or DXGI swap chain | `ui-platform-win32` |
 | A colour role, material, motion curve, or capability | `ui-design`, `ui-style` |
 | A control shared by two or more systems | `ui-widgets` |
 | A control of one design system | that system's `ui-widgets-*` crate |

@@ -2,7 +2,7 @@
 
 One engine builds one `DrawList`; two paths turn it into pixels. The CPU path
 rasterises into memory, the GPU path renders into a dma-buf that the compositor
-scans out directly.
+scans out directly — or, on Windows, into a DXGI swap chain's back buffer.
 
 ## Shared by both
 
@@ -71,6 +71,45 @@ ellipse, a line, a sector and a blurred layer over an opaque backdrop, checking
 eight invariants: shape edges land where the primitive says, off-shape pixels
 keep the backdrop, and the layer composite keeps its orientation. It does not
 compare against the GL backend; that needs a Linux run.
+
+### The Windows window
+
+`ui-platform-win32` is the D3D11 device's window: `CreateWindowExW` under
+per-monitor DPI awareness, an `IDXGISwapChain1` from `CreateSwapChainForHwnd`
+(`B8G8R8A8_UNORM`, two buffers, `DXGI_SWAP_EFFECT_FLIP_DISCARD`), and
+`Present(1, 0)` for vsync pacing. It implements `SceneTarget`, so the app loop
+drives it exactly as it drives the Wayland GPU window; the opening size in a
+`SurfaceSpec` is logical and becomes a physical client area through
+`AdjustWindowRectExForDpi`.
+
+The painter never draws into the back buffer. `ui-gpu-scene` keeps a frame
+target of its own and, at the end of a frame, blits only the damage band into
+the target it was handed; the presenter hands it a second persistent `Rgba8`
+target, then runs `D3d11Device::present_copy`, one fullscreen-triangle pass
+that samples all of that target into the back buffer. Two reasons for the
+extra target: a flip-discard back buffer holds no previous frame, which the
+band's untouched pixels depend on, and a plain `CopySubresourceRegion` does not
+convert RGBA to BGRA, while the destination view's format orders the channels
+during the sample. A resize releases the adopted back buffer, calls
+`ResizeBuffers`, adopts buffer 0 again and resizes the frame target.
+
+D3D11 hides a flip chain's rotation — `GetBuffer(0)` is always the buffer to
+draw into, and `GetBuffer(1)` returns `DXGI_ERROR_INVALID_CALL` — so the
+presenter holds one back-buffer target. A capture therefore reads buffer 0
+inside `present_scene`, after the copy and before `Present`: after the flip,
+that index holds the next, still-blank storage.
+
+`cargo run -p ui-platform-win32 --example window_scene --release` draws a scene
+of three primaries, a rounded bar animated from `cx.now()` and a line of text;
+`WINDOW_CHECK=1` reads the presented buffer back at the opening extent, resizes
+the window to 720×480, and reads it back again. Verified on Windows 11 at 1.25
+device pixels per logical unit (1200×800 and 720×480 client areas): all four
+probes passed at both extents. `WINDOW_DUMP=path` writes the frame as a PPM.
+
+Not implemented on this path: pointer, keyboard, clipboard and IME — the window
+pump translates no input and the `SceneTarget` hooks stay at their no-op
+defaults — layer surfaces, which `Win32Window::new` refuses with
+`UnsupportedRole`, and HDR.
 
 ### Invariants
 
@@ -188,6 +227,11 @@ shadow scenes each found defects on their first comparison run.
 | Pass a mip-chained target to `CopyResource` | The copy fails, silently, and the readback is zeros |
 | Clear a damage band with `ClearRenderTargetView` | The whole frame is cleared and the band's promise is gone |
 | Leave `SV_POSITION` out of the pixel shader's struct | Every input reads its neighbouring register |
+| Draw the painter straight into a flip-model back buffer | The damage bands assume a previous frame the discarded buffer never held |
+| `CopySubresourceRegion` a frame into a `B8G8R8A8` view | Channels are copied, not converted: red and blue swap |
+| Read a flip chain's buffer 0 after `Present` | After the flip it is the next, blank storage |
+| `ResizeBuffers` while a target still holds the back buffer | The call fails on the live reference |
+| Give a `GENERATE_MIPS` texture only one bind flag | `CreateTexture2D` returns `E_INVALIDARG` |
 
 ## Corrections
 
@@ -352,16 +396,29 @@ at every pixel to show the inputs were not the ones the vertex stage wrote. `PsI
 read as empty — which are the two checks that only pass when a *shape*, not a
 rectangle, reaches the target.
 
+**No D3D11 texture bound both `SHADER_RESOURCE` and `RENDER_TARGET`, so the
+glyph atlas could not be created.** The device's texture helper added the
+render-target binding only for textures that were targets, while every texture
+carried `D3D11_RESOURCE_MISC_GENERATE_MIPS`, because `set_sampling(.., mips)`
+may ask for a chain on any of them. D3D11 refuses that misc flag unless both
+bindings are present, so `CreateTexture2D` returned `E_INVALIDARG` — reported
+as `atlas upload: texture: 参数错误` on the first frame that drew text.
+`d3d11_scene` draws shapes only, so no example had exercised the path. Every
+texture now binds both, which is also what the chain needs: `GenerateMips`
+reads a shader resource view and writes a render target view of one resource.
+Caught by `window_scene`'s first frame, the first thing in the tree to draw
+text through the device.
+
 ## Status
 
 Implemented: both presenters, dma-buf zero-copy, explicit sync, HDR targets,
 offscreen layers, text on both paths, every `DrawList` primitive on both paths,
-fractional scaling, and a D3D11 device that renders the whole `DrawList`
-offscreen on Windows.
+fractional scaling, a D3D11 device that renders the whole `DrawList` on
+Windows, and a Win32 window that presents it through a DXGI flip-model swap
+chain.
 
-Not implemented: a Windows window or present path — the D3D11 device has no
-target a compositor scans out yet — and Vulkan. The Windows and Vulkan notes in
-`old/` are surveys, not code.
+Not implemented: input, clipboard, IME, layer surfaces and HDR on the Windows
+window; Vulkan. The Windows and Vulkan notes in `old/` are surveys, not code.
 
 ## See also
 
