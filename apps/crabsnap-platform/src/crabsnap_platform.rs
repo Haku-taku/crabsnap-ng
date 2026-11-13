@@ -5,15 +5,15 @@
 //! transport carries it is the target tables' decision, and the re-exports below are the only
 //! place that choice appears.
 
+// The ffmpeg shim loads the libraries itself and has a loader per platform inside, so the
+// one crate serves both targets and needs no row in the tables below.
+pub use crabsnap_platform_ffmpeg as shim;
+
 #[cfg(unix)]
-pub use crabsnap_platform_unix::{
-    CAPTURE_BACKENDS, Client, ClientError, address, capture, paths, shim,
-};
+pub use crabsnap_platform_unix::{CAPTURE_BACKENDS, Client, ClientError, address, capture, paths};
 
 #[cfg(windows)]
-pub use crabsnap_platform_win32::{
-    CAPTURE_BACKENDS, Client, ClientError, address, capture, paths, shim,
-};
+pub use crabsnap_platform_win32::{CAPTURE_BACKENDS, Client, ClientError, address, capture, paths};
 
 #[cfg(not(any(unix, windows)))]
 compile_error!("crabsnap-platform has no local channel for this target");

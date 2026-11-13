@@ -1,0 +1,18 @@
+[package]
+name = "crabsnap-platform-ffmpeg"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "The C shim into libavcodec, loaded at runtime so a build without ffmpeg still runs."
+
+[lib]
+path = "src/ffmpeg.rs"
+
+[dependencies]
+crabsnap-core = { path = "../../crabsnap-core" }
+
+# The shim is C: it declares libav*'s functions itself and loads the libraries at runtime,
+# so the headers are all the build needs.
+[build-dependencies]
+cc = "1"

@@ -6,7 +6,7 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
-use ui_core::colour::{Chromaticities, ContentColour, TransferFunction};
+use ui_core::colour::{Chromaticities, ContentColour, PixelStorage, TransferFunction};
 use ui_core::draw::{
     Canvas, CanvasId, DrawList, ImageEntry, ImagePrim, ImageSource, Sampling, Transform,
 };
@@ -20,7 +20,7 @@ use ui_platform::element::Element;
 
 use crabsnap_core::media::Kind;
 
-use crate::capture::Cropped;
+use crate::capture::{Cropped, Light};
 use crate::document::{Document, Space};
 use crate::pin::badge::{Anchor, Badge, Policy, Show, Tone};
 use crate::pin::edit::{self, Session};
@@ -95,6 +95,9 @@ impl Bitmap {
     /// The same list the screen paints, through the same CPU rasterizer: a preview and an
     /// export that took different routes would eventually disagree about a pixel.
     fn flattened(&self) -> Result<Cropped, String> {
+        // Marks cannot be rasterized into a float picture, so the refusal below has to see a
+        // measurement; the rendition measures its own bound when no marks are in the way.
+        self.image.measure_peak();
         baked(&self.image, &self.document)
     }
 
@@ -243,6 +246,7 @@ pub(crate) fn window(image: &Cropped, document: &Document, win: Rect) -> Cropped
         data: Arc::new(ui_paint::encode_rgba_straight(&pixels)),
         colour: ContentColour::SDR,
         scale: image.scale,
+        light: Light::sdr(),
     }
 }
 
@@ -268,11 +272,13 @@ pub(crate) fn baked_in(
         data: Arc::clone(&image.data),
         colour: image.colour,
         scale: image.scale,
+        // The same pixels: a measurement of the picture answers for this copy too.
+        light: image.light.clone(),
     };
     if document.is_empty() {
         return Ok(whole);
     }
-    if image.colour.transfer.is_hdr() {
+    if image.light.is_hdr() {
         return Err(String::from(
             "marks on an HDR picture are not exported yet: flattening writes SDR",
         ));
@@ -291,12 +297,17 @@ pub(crate) fn baked_in(
         data: Arc::new(ui_paint::encode_rgba_straight(&pixels)),
         colour: ContentColour::SDR,
         scale: image.scale,
+        light: Light::sdr(),
     })
 }
 
 impl PinContent for Bitmap {
     fn kind(&self) -> Kind {
         Kind::Bitmap
+    }
+
+    fn measure(&self, jobs: &ui_platform::jobs::Jobs) {
+        measure_light(jobs, &self.image);
     }
 
     fn title(&self) -> Option<String> {
@@ -312,7 +323,7 @@ impl PinContent for Bitmap {
 
     fn badges(&self, catalog: &ui_i18n::Catalog) -> Vec<Badge> {
         hdr_badges(
-            self.image.colour,
+            &self.image,
             catalog.text_by_id("pin-badge-hdr").to_string(),
         )
     }
@@ -543,13 +554,34 @@ impl PinContent for Bitmap {
     }
 }
 
-/// The pair a picture wears when it can carry more than SDR: the word, and the detail
-/// behind it while the reveal key is held.
+/// Measure a picture's absolute light on the job worker.
 ///
-/// The transfer function decides, not `max_nits`: a capture carries the display's own
-/// reference white, which says nothing about the picture.
-fn hdr_badges(colour: ContentColour, label: String) -> Vec<Badge> {
-    if !colour.transfer.is_hdr() {
+/// Nothing in the frame that shows the pin waits for it: the pixels are shared through the
+/// `Arc` the pin already holds, the result lands in the picture's own `Light`, and the wake
+/// that follows brings the badge in on the next frame. A worker that refused the job leaves
+/// it unmeasured, and the export measures then.
+pub(crate) fn measure_light(jobs: &ui_platform::jobs::Jobs, image: &Cropped) {
+    if !image.colour.holds_absolute_light() || image.light.peak_nits().is_some() {
+        return;
+    }
+    let pixels = Arc::clone(&image.data);
+    let light = image.light.clone();
+    let colour = image.colour;
+    let _ = jobs.submit(move || {
+        if let Some(nits) = crate::capture::brightest_nits(&pixels, colour) {
+            light.measured(nits);
+        }
+    });
+}
+
+/// The pair a picture wears when it holds more than SDR: the word, and the detail behind it
+/// while the reveal key is held.
+///
+/// What decides is the light measured from the pixels against the display's own white, not
+/// the transfer function: a float capture is scRGB whether or not anything in it is bright,
+/// and a PQ picture of a grey desktop is HDR-tagged without holding a single highlight.
+fn hdr_badges(image: &Cropped, label: String) -> Vec<Badge> {
+    if !image.light.is_hdr() {
         return Vec::new();
     }
     let anchor = Anchor::NorthWest;
@@ -557,7 +589,7 @@ fn hdr_badges(colour: ContentColour, label: String) -> Vec<Badge> {
         Badge::new("hdr", label, anchor, Policy::Preferred, Show::Always).tone(Tone::Error),
         Badge::new(
             "hdr-detail",
-            hdr_detail(colour),
+            hdr_detail(image),
             anchor,
             Policy::Preferred,
             Show::AdvancedOnly,
@@ -566,12 +598,15 @@ fn hdr_badges(colour: ContentColour, label: String) -> Vec<Badge> {
     ]
 }
 
-/// What the HDR detail says: the curve, the primaries, and the peak when one is stated.
-fn hdr_detail(colour: ContentColour) -> String {
+/// What the HDR detail says: the curve, the primaries, and the measured peak.
+fn hdr_detail(image: &Cropped) -> String {
+    let colour = image.colour;
     let transfer = match colour.transfer {
         TransferFunction::Pq => "PQ",
         TransferFunction::Hlg => "HLG",
         TransferFunction::Srgb => "sRGB",
+        // Float linear light over sRGB primaries is scRGB, the name people know it by.
+        TransferFunction::Linear if colour.storage == PixelStorage::Float16 => "scRGB",
         TransferFunction::Linear => "linear",
         TransferFunction::Gamma(_) => "gamma",
     };
@@ -584,17 +619,15 @@ fn hdr_detail(colour: ContentColour) -> String {
     } else {
         "custom primaries"
     };
-    if colour.max_nits > 0.0 {
-        format!("{transfer} · {primaries} · {:.0} nit", colour.max_nits)
-    } else {
-        format!("{transfer} · {primaries}")
+    match image.light.peak_nits() {
+        Some(peak) => format!("{transfer} · {primaries} · {peak:.0} nit"),
+        None => format!("{transfer} · {primaries}"),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ui_core::colour::PixelStorage;
 
     /// The export is the canvas composition: a mark lands inside the picture's pixels and
     /// the bytes outside it are the decoded picture's own.
@@ -610,6 +643,7 @@ mod tests {
             data: Arc::new(data),
             colour: ContentColour::SDR,
             scale: 1.0,
+            light: Light::sdr(),
         };
         let mut bitmap = Bitmap::new(image, 1.0);
         let mark = crate::document::Mark {
@@ -649,6 +683,7 @@ mod tests {
             data: Arc::new(std::iter::repeat_n([0u8, 0, 0, 255], 4).flatten().collect()),
             colour: ContentColour::SDR,
             scale: 1.0,
+            light: Light::sdr(),
         };
         let mut document = Document::new();
         let mark = crate::document::Mark {
@@ -674,27 +709,34 @@ mod tests {
         );
     }
 
-    /// Marks over an HDR picture are refused rather than flattened to SDR; with no marks
-    /// the export is the decoded bytes themselves, with no copy.
+    /// A picture holding more than the display's white, with that white measured against it.
+    fn lit(colour: ContentColour, reference_nits: f32, peak_nits: Option<f32>) -> Cropped {
+        let light = Light::of(reference_nits);
+        if let Some(peak) = peak_nits {
+            light.measured(peak);
+        }
+        Cropped {
+            origin: (0, 0),
+            width: 4,
+            height: 4,
+            data: Arc::new(std::iter::repeat_n([0u8, 0, 0, 255], 4 * 4).flatten().collect()),
+            colour,
+            scale: 1.0,
+            light,
+        }
+    }
+
+    /// Marks over a picture that holds light above the display's white are refused rather
+    /// than flattened to SDR; with no marks the export is the decoded bytes, with no copy.
     #[test]
     fn marks_over_an_hdr_picture_are_refused_and_a_plain_export_copies_nothing() {
-        let data: Vec<u8> = std::iter::repeat_n([0u8, 0, 0, 255], 4 * 4)
-            .flatten()
-            .collect();
         let pq = ContentColour {
             storage: PixelStorage::Packed10,
             primaries: Chromaticities::BT2020,
             transfer: TransferFunction::Pq,
             max_nits: 1000.0,
         };
-        let image = Cropped {
-            origin: (0, 0),
-            width: 4,
-            height: 4,
-            data: Arc::new(data),
-            colour: pq,
-            scale: 1.0,
-        };
+        let image = lit(pq, 240.0, Some(1000.0));
         let mut bitmap = Bitmap::new(image, 1.0);
 
         let plain = bitmap.flattened().expect("no marks needs no rasterizer");
@@ -721,30 +763,32 @@ mod tests {
         );
     }
 
-    /// A PQ picture declares the word and the detail; an SDR one declares nothing, even
-    /// when it carries a peak; the detail names the curve, the primaries and the peak.
+    /// The measured light decides, not the transfer: a float capture of an SDR desktop is
+    /// tagged scRGB and claims nothing, and one nobody measured says nothing yet.
     #[test]
-    fn an_hdr_picture_says_so_and_a_plain_one_does_not() {
+    fn only_light_measured_above_the_display_white_says_hdr() {
         let pq = ContentColour {
             storage: PixelStorage::Packed10,
             primaries: Chromaticities::BT2020,
             transfer: TransferFunction::Pq,
             max_nits: 1000.0,
         };
-        let badges = hdr_badges(pq, "HDR".into());
+        let badges = hdr_badges(&lit(pq, 240.0, Some(1000.0)), "HDR".into());
         assert_eq!(badges.len(), 2);
         assert_eq!(badges[0].label, "HDR");
         assert_eq!(badges[0].show, Show::Always);
         assert_eq!(badges[1].show, Show::AdvancedOnly);
         assert_eq!(badges[1].label, "PQ · BT.2020 · 1000 nit");
 
-        let tagged_sdr = ContentColour {
-            max_nits: 203.0,
-            ..ContentColour::SDR
-        };
+        let captured_sdr = lit(ContentColour::scrgb(470.0), 240.0, Some(240.0));
         assert!(
-            hdr_badges(tagged_sdr, "HDR".into()).is_empty(),
-            "the display's own reference white is not an HDR claim"
+            hdr_badges(&captured_sdr, "HDR".into()).is_empty(),
+            "a float capture of an SDR desktop is not an HDR claim"
+        );
+        let unmeasured = lit(ContentColour::scrgb(470.0), 240.0, None);
+        assert!(
+            hdr_badges(&unmeasured, "HDR".into()).is_empty(),
+            "the badge waits for the measurement rather than guessing"
         );
     }
 }

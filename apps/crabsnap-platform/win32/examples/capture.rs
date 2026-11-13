@@ -79,6 +79,7 @@ fn rendition(image: &Image) -> Frame {
         colour: ContentColour::SDR,
         output: None,
         scale: image.scale,
+        reference_nits: image.light.reference_nits(),
     }
 }
 

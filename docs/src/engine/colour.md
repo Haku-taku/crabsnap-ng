@@ -230,9 +230,14 @@ knee at `1.5 · target/source − 0.5` and runs a cubic Hermite from the knee to
 the target peak, with the same slope as the straight part at the knee and
 zero slope at the top.
 
-Where the curve does not apply yet: a file gets `clip`, the rendition the
-tool has always written, because which curve an export should use belongs to
-the export design. Display always uses the destination's curve.
+Which peak bounds the curve is the content's *measured* light, not
+`ContentColour::max_nits`: the latter is the display's capability, so a float
+capture of an SDR desktop states 1000 nits while holding 240. `with_peak` swaps
+the measured value in for the placement. Measuring means one pass over the
+pixels, which an app runs off the frame: a pin queues it on the job worker and
+a file measures only when it is written. A file written from a picture above
+the destination's white now gets `bt2390`; below it the curve is skipped and the
+rendition is a plain conversion. Display always uses the destination's curve.
 
 ## Where the description comes from
 
@@ -281,6 +286,14 @@ never replaces the original. An advanced-colour desktop arrives as scRGB half
 floats instead, eight bytes a texel, and travels the same way: the bytes are
 copied row by row and the description says `Float16`, so the light above white
 reaches the pin and only the destination decides what to do with it.
+
+The frame also carries the display's SDR white, and a picture carries it on as
+a `Light` through every crop and bake, together with whatever peak has been
+measured from the pixels. A crop of part of the frame starts a new `Light`: its
+peak is its own, and the whole-frame crop shares the measurement because it is
+the same pixels. Windows reports the white it maps SDR to; a Wayland output
+description states a peak and no white, so an absolute capture there is measured
+against the model's own 203 nits.
 
 ## Traps
 
@@ -415,6 +428,17 @@ skips the transfer decode for it — the decode clamps at 1.0, which is exactly
 the light the packing exists to keep. Caught by
 `a_float_frame_keeps_the_light_above_white` and
 `a_float_picture_keeps_its_light_above_the_reference_white`.
+
+**A picture's peak was whatever the display could do.** `max_nits` comes from
+the output and travelled with a capture, so tone mapping normalised to it. On a
+1000-nit display a desktop holding 240 would be mapped as if it held 1000:
+BT.2390 places its knee at a fraction of the *source* peak, so the same white
+lands on a different code depending on which number is passed, and a range is
+compressed for light that is not in the picture. `with_peak` replaces the field
+with a peak measured from the pixels before a placement is derived; an
+unmeasured picture keeps the stated peak, the widest bound it can honestly
+have. Caught by `a_measured_picture_rolls_its_highlights_into_the_file_white`,
+which collapses to two 255s when the file's destination returns to `Clip`.
 
 ## Verification
 

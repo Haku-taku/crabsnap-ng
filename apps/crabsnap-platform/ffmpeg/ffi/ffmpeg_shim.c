@@ -1,8 +1,6 @@
 /* See ffmpeg_shim.h for why this is C. Everything ABI-sensitive stays in here. */
 #include "ffmpeg_shim.h"
 
-#include <dlfcn.h>
-#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,10 +17,113 @@
 #define XSTR_(x) #x
 #define XSTR(x) XSTR_(x)
 
+/* One library handle, and how a name becomes one: the loaders differ in the handle type,
+ * the registry they search, and whether a name reaches a module's own dependencies. */
+#ifdef _WIN32
+#include <windows.h>
+typedef HMODULE cs_library;
+
+/* GetProcAddress reads one module and Windows has no soname registry, so a name is the
+ * file's stem with the major version the headers state. */
+#define CS_FORMAT_VERSIONED "avformat-" XSTR(LIBAVFORMAT_VERSION_MAJOR) ".dll"
+#define CS_FORMAT_BARE "avformat.dll"
+#define CS_CODEC_VERSIONED "avcodec-" XSTR(LIBAVCODEC_VERSION_MAJOR) ".dll"
+#define CS_CODEC_BARE "avcodec.dll"
+#define CS_UTIL_VERSIONED "avutil-" XSTR(LIBAVUTIL_VERSION_MAJOR) ".dll"
+#define CS_UTIL_BARE "avutil.dll"
+#define CS_SWS_VERSIONED "swscale-" XSTR(LIBSWSCALE_VERSION_MAJOR) ".dll"
+#define CS_SWS_BARE "swscale.dll"
+
+/* The loader's DLL_LOAD_DIR flag takes only a Windows path: a forward slash under it reads
+ * as a module name and the load fails with "module not found", while plain flags accept it. */
+#define CS_SEPARATOR "\\"
+
+/* A configured path brings its own directory for the libraries it depends on; a bare name
+ * is left to the standard search, which is what finds one installed on PATH. */
+static cs_library library_open(const char *name, int configured) {
+    wchar_t wide[1024];
+    if (MultiByteToWideChar(CP_UTF8, 0, name, -1, wide, 1024) == 0) return NULL;
+    if (configured) {
+        return LoadLibraryExW(wide, NULL,
+                              LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR |
+                                  LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    }
+    return LoadLibraryExW(wide, NULL, 0);
+}
+
+static void *library_symbol(cs_library library, const char *name) {
+    return (void *)(uintptr_t)GetProcAddress(library, name);
+}
+
+static void library_close(cs_library library) { FreeLibrary(library); }
+
+/* The system's text for the last failed call, without the newline it ends with, in UTF-8:
+ * FormatMessageA answers in the console's code page and the message travels to a UTF-8
+ * string. */
+static const char *library_reason(void) {
+    static char text[1536];
+    wchar_t wide[512];
+    DWORD code = GetLastError();
+    DWORD length =
+        FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, code,
+                       0, wide, (DWORD)(sizeof wide / sizeof wide[0]), NULL);
+    if (!length ||
+        WideCharToMultiByte(CP_UTF8, 0, wide, -1, text, sizeof text, NULL, NULL) == 0) {
+        snprintf(text, sizeof text, "error %lu", (unsigned long)code);
+        return text;
+    }
+    length = (DWORD)strlen(text);
+    while (length && (text[length - 1] == '\n' || text[length - 1] == '\r')) {
+        text[--length] = 0;
+    }
+    return text;
+}
+
+static SRWLOCK state_lock = SRWLOCK_INIT;
+static void lock_state(void) { AcquireSRWLockExclusive(&state_lock); }
+static void unlock_state(void) { ReleaseSRWLockExclusive(&state_lock); }
+#else
+#include <dlfcn.h>
+#include <pthread.h>
+typedef void *cs_library;
+
+#define CS_FORMAT_VERSIONED "libavformat.so." XSTR(LIBAVFORMAT_VERSION_MAJOR)
+#define CS_FORMAT_BARE "libavformat.so"
+#define CS_CODEC_VERSIONED "libavcodec.so." XSTR(LIBAVCODEC_VERSION_MAJOR)
+#define CS_CODEC_BARE "libavcodec.so"
+#define CS_UTIL_VERSIONED "libavutil.so." XSTR(LIBAVUTIL_VERSION_MAJOR)
+#define CS_UTIL_BARE "libavutil.so"
+#define CS_SWS_VERSIONED "libswscale.so." XSTR(LIBSWSCALE_VERSION_MAJOR)
+#define CS_SWS_BARE "libswscale.so"
+#define CS_SEPARATOR "/"
+
+/* dlopen(NULL) is the main program, not "nothing": never call it with a NULL name. */
+static cs_library library_open(const char *name, int configured) {
+    (void)configured;
+    return dlopen(name, RTLD_NOW | RTLD_LOCAL);
+}
+
+static void *library_symbol(cs_library library, const char *name) {
+    return dlsym(library, name);
+}
+
+static void library_close(cs_library library) { dlclose(library); }
+
+static const char *library_reason(void) { return dlerror(); }
+
+static pthread_mutex_t state_lock = PTHREAD_MUTEX_INITIALIZER;
+static void lock_state(void) { pthread_mutex_lock(&state_lock); }
+static void unlock_state(void) { pthread_mutex_unlock(&state_lock); }
+#endif
+
 typedef struct {
-    void *handle;
+    cs_library handle; /* libavformat */
+    /* The Windows loader resolves one module at a time, so avcodec and avutil are opened
+     * beside it; the ELF loader finds them through libavformat's own dependencies. */
+    cs_library codec;
+    cs_library util;
     /* libswscale is a separate library: libavformat does not depend on it. */
-    void *sws;
+    cs_library sws;
     /* 0 untried, 1 ready, -1 unusable. */
     int state;
     char versions[64];
@@ -105,10 +206,10 @@ typedef struct {
  * unmapped — retrying opens another reference, and dropping the last one under a running call
  * would leave it calling freed code. */
 static Lib lib;
-static pthread_mutex_t state_lock = PTHREAD_MUTEX_INITIALIZER;
 
-/* Wide enough for a configured library path inside a message. */
-static char error[704];
+/* Wide enough for a configured library path inside a message. Named apart from the `error`
+ * parameter each call carries, which is the caller's buffer. */
+static char failure_text[704];
 
 static void copy_text(char *to, size_t cap, const char *from) {
     if (!from) {
@@ -118,11 +219,24 @@ static void copy_text(char *to, size_t cap, const char *from) {
     snprintf(to, cap, "%s", from);
 }
 
+/* One symbol from whichever loaded module exports it. Windows reads one module at a time, so
+ * avcodec and avutil stand beside libavformat; on ELF the first lookup already reaches them. */
+static void *find_symbol(Lib *out, const char *name) {
+#ifdef _WIN32
+    void *found = library_symbol(out->handle, name);
+    if (!found && out->codec) found = library_symbol(out->codec, name);
+    if (!found && out->util) found = library_symbol(out->util, name);
+    return found;
+#else
+    return library_symbol(out->handle, name);
+#endif
+}
+
 #define LOAD(out, field, name)                                                 \
     do {                                                                       \
-        *(void **)(&(out)->field) = dlsym((out)->handle, name);                \
+        *(void **)(&(out)->field) = find_symbol(out, name);                    \
         if (!(out)->field) {                                                   \
-            snprintf(error, sizeof error, "missing symbol %s", name);          \
+            snprintf(failure_text, sizeof failure_text, "missing symbol %s", name);          \
             goto failed;                                                       \
         }                                                                      \
     } while (0)
@@ -192,107 +306,143 @@ failed:
 static char library_directory[512];
 
 void cs_reopen(const char *directory) {
-    pthread_mutex_lock(&state_lock);
+    lock_state();
     snprintf(library_directory, sizeof library_directory, "%s", directory ? directory : "");
+#ifdef _WIN32
+    /* A configured path may carry either separator; the loader's own flag takes one. */
+    for (char *at = library_directory; *at; at++) {
+        if (*at == '/') *at = '\\';
+    }
+#endif
     /* What is published stays usable; the next cs_open builds a candidate from scratch. */
     lib.state = 0;
-    pthread_mutex_unlock(&state_lock);
+    unlock_state();
 }
 
-/* `<library_directory>/<name>` written into `path`, or NULL when no directory was set. */
+/* `<library_directory><separator><name>` written into `path`, or NULL when none was set. */
 static const char *in_library_directory(char *path, size_t cap, const char *name) {
     if (!library_directory[0]) return NULL;
-    snprintf(path, cap, "%s/%s", library_directory, name);
+    snprintf(path, cap, "%s" CS_SEPARATOR "%s", library_directory, name);
     return path;
 }
 
-/* Open the libraries into `out`; 0 when no name works, with `error` saying why. Candidates
- * that are not published are closed again; nothing that was published ever is. */
+/* Choose the first of the configured directory, the versioned name and the bare one. A total
+ * failure reports the configured path's reason: that is the one the caller set. */
+static int open_any(cs_library *into, const char *versioned, const char *bare) {
+    char path[600];
+    char configured_failure[2048];
+    configured_failure[0] = 0;
+    const char *configured = in_library_directory(path, sizeof path, versioned);
+    if (configured) {
+        *into = library_open(configured, 1);
+        if (!*into) {
+            snprintf(configured_failure, sizeof configured_failure, "%s: %s", configured,
+                     library_reason());
+        }
+    }
+    if (!*into) {
+        configured = in_library_directory(path, sizeof path, bare);
+        if (configured) *into = library_open(configured, 1);
+    }
+    if (!*into) *into = library_open(versioned, 0);
+    if (!*into) *into = library_open(bare, 0);
+    if (*into) return 0;
+    if (configured_failure[0]) {
+        snprintf(failure_text, sizeof failure_text, "%s", configured_failure);
+        return -1;
+    }
+    const char *reason = library_reason();
+    snprintf(failure_text, sizeof failure_text, "%s: %s", versioned,
+             reason ? reason : "not found");
+    return -1;
+}
+
+#ifdef _WIN32
+/* The modules libavformat does not answer for: GetProcAddress reads one module, where the
+ * ELF loader reaches a name through its dependencies. */
+static int open_companions(Lib *out) {
+    if (open_any(&out->codec, CS_CODEC_VERSIONED, CS_CODEC_BARE) != 0) return -1;
+    if (open_any(&out->util, CS_UTIL_VERSIONED, CS_UTIL_BARE) != 0) return -1;
+    return 0;
+}
+#else
+static int open_companions(Lib *out) {
+    (void)out;
+    return 0;
+}
+#endif
+
+/* Release a candidate that never became the process's state. */
+static void close_candidate(Lib *out) {
+    if (out->sws) library_close(out->sws);
+    if (out->codec) library_close(out->codec);
+    if (out->util) library_close(out->util);
+    if (out->handle) library_close(out->handle);
+    out->sws = out->codec = out->util = out->handle = NULL;
+}
+
+/* Open the libraries into `out`; 0 when no name works, with `failure_text` saying why.
+ * Candidates that are not published are closed again; nothing that was published ever is. */
 static int load(Lib *out) {
     /* The headers pin the ABI, so only the matching major can be used. Asking for the
-     * versioned soname first also keeps an older install (a compat package) from being
-     * picked up by the unversioned link. */
-    char configured[600];
-    const char *names[4];
-    int count = 0;
-    const char *from_directory = in_library_directory(
-        configured, sizeof configured, "libavformat.so." XSTR(LIBAVFORMAT_VERSION_MAJOR));
-    /* Only when a directory was configured: a NULL here would end the list. */
-    if (from_directory) names[count++] = from_directory;
-    names[count++] = "libavformat.so." XSTR(LIBAVFORMAT_VERSION_MAJOR);
-    names[count++] = "libavformat.so";
-    names[count] = NULL;
-    for (int i = 0; names[i]; i++) {
-        out->handle = dlopen(names[i], RTLD_NOW | RTLD_LOCAL);
-        if (!out->handle) {
-            snprintf(error, sizeof error, "%s: %s", names[i], dlerror());
-            continue;
-        }
-        if (resolve(out) != 0) {
-            dlclose(out->handle);
-            out->handle = NULL;
-            continue;
-        }
-        char sws_path[600];
-        const char *configured_sws = in_library_directory(
-            sws_path, sizeof sws_path, "libswscale.so." XSTR(LIBSWSCALE_VERSION_MAJOR));
-        /* dlopen(NULL) is the main program, not "nothing": only call it with a path. */
-        out->sws = configured_sws ? dlopen(configured_sws, RTLD_NOW | RTLD_LOCAL) : NULL;
-        if (!out->sws) {
-            out->sws = dlopen("libswscale.so." XSTR(LIBSWSCALE_VERSION_MAJOR),
-                              RTLD_NOW | RTLD_LOCAL);
-        }
-        if (!out->sws) {
-            out->sws = dlopen("libswscale.so", RTLD_NOW | RTLD_LOCAL);
+     * versioned name first also keeps an older install (a compat package) from being picked
+     * up by the unversioned one. */
+    if (open_any(&out->handle, CS_FORMAT_VERSIONED, CS_FORMAT_BARE) != 0) return 0;
+    if (open_companions(out) != 0) {
+        close_candidate(out);
+        return 0;
+    }
+    if (resolve(out) != 0) {
+        close_candidate(out);
+        return 0;
+    }
+    open_any(&out->sws, CS_SWS_VERSIONED, CS_SWS_BARE);
+    if (out->sws) {
+        *(void **)(&out->sws_get_context) = library_symbol(out->sws, "sws_getContext");
+        *(void **)(&out->sws_scale) = library_symbol(out->sws, "sws_scale");
+        *(void **)(&out->sws_free_context) = library_symbol(out->sws, "sws_freeContext");
+        if (!out->sws_get_context || !out->sws_scale || !out->sws_free_context) {
+            library_close(out->sws);
+            out->sws = NULL;
         }
         if (out->sws) {
-            *(void **)(&out->sws_get_context) = dlsym(out->sws, "sws_getContext");
-            *(void **)(&out->sws_scale) = dlsym(out->sws, "sws_scale");
-            *(void **)(&out->sws_free_context) = dlsym(out->sws, "sws_freeContext");
-            if (!out->sws_get_context || !out->sws_scale || !out->sws_free_context) {
-                dlclose(out->sws);
-                out->sws = NULL;
-            }
-            if (out->sws) {
-                /* Optional: a decode without them keeps libswscale's own matrix guess. */
-                *(void **)(&out->sws_coefficients) = dlsym(out->sws, "sws_getCoefficients");
-                *(void **)(&out->sws_colorspace_details) =
-                    dlsym(out->sws, "sws_setColorspaceDetails");
-            }
+            /* Optional: a decode without them keeps libswscale's own matrix guess. */
+            *(void **)(&out->sws_coefficients) = library_symbol(out->sws, "sws_getCoefficients");
+            *(void **)(&out->sws_colorspace_details) =
+                library_symbol(out->sws, "sws_setColorspaceDetails");
         }
-        unsigned codec = out->codec_version();
-        unsigned format = out->format_version();
-        if ((int)(codec >> 16) != LIBAVCODEC_VERSION_MAJOR ||
-            (int)(format >> 16) != LIBAVFORMAT_VERSION_MAJOR) {
-            snprintf(error, sizeof error,
-                     "%s is avcodec %u.%u, these headers are %d",
-                     names[i], codec >> 16, codec & 0xffff,
-                     LIBAVCODEC_VERSION_MAJOR);
-            dlclose(out->handle);
-            out->handle = NULL;
-            continue;
-        }
-        snprintf(out->versions, sizeof out->versions, "%u.%u.%u %u.%u.%u %u.%u.%u",
-                 codec >> 16, (codec >> 8) & 0xff, codec & 0xff,
-                 format >> 16, (format >> 8) & 0xff, format & 0xff,
-                 out->util_version() >> 16, (out->util_version() >> 8) & 0xff,
-                 out->util_version() & 0xff);
-        if (!out->sws) {
-            snprintf(error, sizeof error, "libavformat loaded but libswscale did not");
-            dlclose(out->handle);
-            out->handle = NULL;
-            continue;
-        }
-        /* The libraries log their choices to stderr; a GUI tool has no place for an
-         * informational line on every save. Errors still come through. */
-        out->set_log_level(AV_LOG_ERROR);
-        return 1;
     }
-    return 0;
+    unsigned codec = out->codec_version();
+    unsigned format = out->format_version();
+    unsigned util = out->util_version();
+    if ((int)(codec >> 16) != LIBAVCODEC_VERSION_MAJOR ||
+        (int)(format >> 16) != LIBAVFORMAT_VERSION_MAJOR ||
+        (int)(util >> 16) != LIBAVUTIL_VERSION_MAJOR) {
+        snprintf(failure_text, sizeof failure_text,
+                 "avcodec %u, avformat %u, avutil %u; these headers are %d, %d, %d",
+                 codec >> 16, format >> 16, util >> 16,
+                 LIBAVCODEC_VERSION_MAJOR, LIBAVFORMAT_VERSION_MAJOR,
+                 LIBAVUTIL_VERSION_MAJOR);
+        close_candidate(out);
+        return 0;
+    }
+    snprintf(out->versions, sizeof out->versions, "%u.%u.%u %u.%u.%u %u.%u.%u",
+             codec >> 16, (codec >> 8) & 0xff, codec & 0xff,
+             format >> 16, (format >> 8) & 0xff, format & 0xff,
+             util >> 16, (util >> 8) & 0xff, util & 0xff);
+    if (!out->sws) {
+        snprintf(failure_text, sizeof failure_text, "libavformat loaded but libswscale did not");
+        close_candidate(out);
+        return 0;
+    }
+    /* The libraries log their choices to stderr; a GUI tool has no place for an
+     * informational line on every save. Errors still come through. */
+    out->set_log_level(AV_LOG_ERROR);
+    return 1;
 }
 
 int cs_open(void) {
-    pthread_mutex_lock(&state_lock);
+    lock_state();
     int ready;
     if (lib.state != 0) {
         ready = lib.state > 0;
@@ -307,14 +457,14 @@ int cs_open(void) {
             lib.state = -1;
         }
     }
-    pthread_mutex_unlock(&state_lock);
+    unlock_state();
     return ready;
 }
 
 const char *cs_versions(void) { return cs_open() ? lib.versions : NULL; }
 const char *cs_error(void) {
     if (lib.state >= 0) return NULL;
-    return error[0] ? error : "the ffmpeg libraries could not be used";
+    return failure_text[0] ? failure_text : "the ffmpeg libraries could not be used";
 }
 
 /* Every listing below fills at most `cap` entries and always returns the total, so a caller

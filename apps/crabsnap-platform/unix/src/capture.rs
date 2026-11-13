@@ -221,6 +221,13 @@ fn described(
             ..ui_core::colour::ContentColour::SDR
         },
     };
+    // The description states an output's peak, not its SDR white; an absolute capture is
+    // measured against the model's own white instead.
+    let reference_nits = if colour.holds_absolute_light() {
+        ui_core::colour::SDR_WHITE_NITS
+    } else {
+        0.0
+    };
     Frame {
         width,
         height,
@@ -230,5 +237,6 @@ fn described(
         colour,
         output: output.cloned(),
         scale: scale.unwrap_or(1.0),
+        reference_nits,
     }
 }

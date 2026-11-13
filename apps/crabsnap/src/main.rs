@@ -456,6 +456,8 @@ impl Overlay {
             .translated(-(x as f32), -(y as f32));
         let scale = self.surface_scale;
         let (width, height) = self.logical_size();
+        // The picture's light is measured off this thread: the pin appears at once.
+        crate::pin::content::measure_light(&self.jobs, &cropped);
         self.pending_pins.borrow_mut().push(Pin::new(
             Box::new(Bitmap::with_marks(cropped, scale, document, opened_at)),
             Placement {
@@ -477,8 +479,10 @@ impl Overlay {
     fn baked(&self) -> Option<capture::Cropped> {
         let cropped = self.cropped()?;
         // A file is sRGB whatever the capture was, so marks go on that rendition: refusing an
-        // HDR frame would change the file only by leaving the user's marks out of it.
-        let picture = if cropped.colour.transfer.is_hdr() {
+        // HDR frame would change the file only by leaving the user's marks out of it. Without
+        // marks the picture leaves native, and the worker that writes it converts once.
+        let bare = self.document.is_empty();
+        let picture = if !bare && cropped.colour.storage != ui_core::colour::PixelStorage::Sdr8 {
             cropped.sdr()
         } else {
             cropped
@@ -2606,7 +2610,11 @@ pub(crate) fn show_pins(
     settings: Arc<Settings>,
 ) -> Result<(), String> {
     let mut canvas = PinCanvas::new(Arc::clone(language), settings.look);
+    // The host owns the job worker, and a pin queued here measures on it before it is shown.
+    let mut host = Host::new(Box::new(backend));
+    let jobs = host.jobs();
     for item in staged {
+        item.content.measure(&jobs);
         let at = Placement {
             screen,
             dots,
@@ -2631,7 +2639,6 @@ pub(crate) fn show_pins(
             .filter_map(Pin::texture_entry)
             .collect()
     };
-    let mut host = Host::new(Box::new(backend));
     host.open(
         pins::canvas_surface(screen),
         canvas,
@@ -2991,6 +2998,7 @@ mod tests {
                     data: Arc::new(Vec::new()),
                     colour: ui_core::colour::ContentColour::SDR,
                     scale: dots,
+                    light: capture::Light::sdr(),
                 },
                 dots,
             )
@@ -3124,6 +3132,7 @@ mod tests {
             data: Arc::new(vec![0u8; 1280 * 720 * 4]),
             colour: ui_core::colour::ContentColour::SDR,
             scale: 1.0,
+            light: capture::Light::sdr(),
         };
         let mut overlay = Overlay::new(
             image,
@@ -3291,6 +3300,7 @@ mod tests {
             data: Arc::new(vec![128u8; 400 * 300 * 4]),
             colour: ui_core::colour::ContentColour::SDR,
             scale: 1.0,
+            light: capture::Light::sdr(),
         };
         let pin = Pin::new(
             Box::new(Bitmap::new(image, 1.0)),
@@ -3424,6 +3434,7 @@ mod tests {
             data: Arc::new(data),
             colour: ui_core::colour::ContentColour::SDR,
             scale: 1.0,
+            light: capture::Light::sdr(),
         };
         let placed = |position| Placement {
             screen,

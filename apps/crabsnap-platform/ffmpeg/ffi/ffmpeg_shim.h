@@ -6,8 +6,9 @@
  * runtime major at open time and reports "unavailable" when they differ. Rust never sees an
  * ffmpeg type.
  *
- * The shim loads libavformat (and with it libavcodec/libavutil) through dlopen, so the
- * binary neither links them nor fails to start without them.
+ * The shim loads the libraries at runtime — dlopen on Unix, LoadLibraryExW on Windows — so
+ * the binary neither links them nor fails to start without them. Windows resolves no
+ * dependencies through GetProcAddress, so avcodec and avutil are opened beside avformat.
  */
 #ifndef CRABSNAP_FFMPEG_SHIM_H
 #define CRABSNAP_FFMPEG_SHIM_H

@@ -162,6 +162,7 @@ impl Vector {
             data: render(&self.tree, width, height)?,
             colour: ContentColour::SDR,
             scale: self.dots,
+            light: capture::Light::sdr(),
         })
     }
 }

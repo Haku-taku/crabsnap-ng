@@ -7,7 +7,7 @@
 //! 两条路的分工：库这条路知道编码器的 id、像素格式和 AVOptions；可执行文件只知道它自己的
 //! 命令行，所以用它自己的列表命令回答（`-encoders`、`-h encoder=NAME`）。
 //!
-//! 为什么经 C 而不是 Rust 绑定：见 `crabsnap-platform/unix/ffi/ffmpeg_shim.h`。
+//! 为什么经 C 而不是 Rust 绑定：见 `crabsnap-platform/ffmpeg/ffi/ffmpeg_shim.h`。
 
 mod decode;
 mod executable;

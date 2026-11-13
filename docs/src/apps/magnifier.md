@@ -425,7 +425,8 @@ driven: the nested session has no pointer-button injection, so its right-hold
 was not exercised by hand.
 
 The loupe shows the picture in the display's SDR rendition, so a highlight above
-the SDR peak reads clipped there even when the pin or the saved file keeps it.
+the SDR peak reads clipped there; the saved file rolls it off into white with
+BT.2390 instead, so above white the disc and the file are not the same picture.
 The disc is baked on every frame it is visible, at 120 times the surface's
 device ratio in texels: 120 × 120 on a 1× surface, 240 × 240 at 2×. Its cost is
 part of the overlay's own frame time rather than measured separately.

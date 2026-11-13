@@ -355,6 +355,9 @@ fn read_png(path: &str, settings: &crate::Settings) -> Result<Vec<u8>, String> {
         data: decoded.data,
         colour: decoded.colour,
         scale: crate::capture::png_scale(&bytes),
+        // A file does not say which display will show it, so the model's own white decides
+        // whether its light counts as more than SDR.
+        light: crate::capture::Light::of(ui_core::colour::SDR_WHITE_NITS),
     }
     .crop(full)
     .png()
@@ -859,6 +862,7 @@ mod tests {
             data: std::sync::Arc::new(data),
             colour: ui_core::colour::ContentColour::SDR,
             scale: 1.0,
+            light: crate::capture::Light::sdr(),
         };
         let screen = (8, 8);
         assert_eq!(

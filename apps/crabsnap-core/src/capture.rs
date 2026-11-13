@@ -5,11 +5,69 @@
 //! that could have shown it. The packings differ per platform, so they are named by their
 //! byte order rather than by any one protocol's spelling.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use ui_core::colour::{ContentColour, Destination, Domain, PixelStorage, ToneMapping};
+use ui_core::colour::{
+    ContentColour, Destination, Domain, PixelStorage, Placement, SCRGB_WHITE_NITS, ToneMapping,
+    TransferFunction, half_to_f32,
+};
 use ui_core::geom::Rect;
+
+/// How much light a picture holds, and the white that says what counts as more than SDR.
+///
+/// Absolute light — scRGB floats or PQ codes — says nothing about *how much* of it there is
+/// until the pixels are read, so whether a picture holds anything above SDR is measured
+/// rather than claimed by its description. The measurement is shared through an `Arc` so a
+/// worker and the pin that queued it see one value, and the pixels are only ever read.
+#[derive(Clone, Default)]
+pub struct Light {
+    /// The display's SDR white in nits; zero when the picture came from an SDR surface.
+    reference_nits: f32,
+    /// The brightest channel measured so far, in nits.
+    peak_nits: Arc<OnceLock<f32>>,
+}
+
+impl Light {
+    /// A picture that carries no light above the desktop's own white.
+    pub fn sdr() -> Self {
+        Self::default()
+    }
+
+    /// A picture from a display whose white is `reference_nits`.
+    pub fn of(reference_nits: f32) -> Self {
+        Self {
+            reference_nits,
+            peak_nits: Arc::default(),
+        }
+    }
+
+    /// The display's SDR white, in nits; zero for an SDR picture.
+    pub fn reference_nits(&self) -> f32 {
+        self.reference_nits
+    }
+
+    /// The measured peak, once someone has measured it.
+    pub fn peak_nits(&self) -> Option<f32> {
+        self.peak_nits.get().copied()
+    }
+
+    /// Whether the picture holds light above the display's white. Unmeasured reads as no:
+    /// the badge waits for the worker rather than stalling the frame that showed the pin.
+    /// Without a white to measure against, no measurement can make the claim.
+    pub fn is_hdr(&self) -> bool {
+        self.reference_nits > 0.0
+            && self
+                .peak_nits
+                .get()
+                .is_some_and(|peak| *peak > self.reference_nits * 1.01)
+    }
+
+    /// Record a measurement; the first answer stands, so a worker and an export agree.
+    pub fn measured(&self, peak_nits: f32) {
+        let _ = self.peak_nits.set(peak_nits);
+    }
+}
 
 /// How a frame's 32-bit words are packed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,6 +113,8 @@ pub struct Frame {
     /// The output's device pixels per logical point: what a saved file's density says, and
     /// nothing about how the pixels are packed.
     pub scale: f32,
+    /// The display's SDR white in nits; zero when the platform has no HDR to report.
+    pub reference_nits: f32,
 }
 
 impl Frame {
@@ -91,6 +151,7 @@ impl Frame {
             data: Arc::new(data),
             colour: self.colour,
             scale: self.scale,
+            light: Light::of(self.reference_nits),
         }
     }
 }
@@ -108,6 +169,8 @@ pub struct Image {
     /// Device pixels per logical point where the picture was taken. It says how large the
     /// picture was meant to be, not how to draw it: layout uses the surface's own scale.
     pub scale: f32,
+    /// How much light the picture holds, and the white it came with.
+    pub light: Light,
 }
 
 impl Image {
@@ -147,6 +210,8 @@ impl Image {
                 data: Arc::clone(&self.data),
                 colour: self.colour,
                 scale: self.scale,
+                // The same pixels, so a measurement of either answers for both.
+                light: self.light.clone(),
             };
         }
         // A crop is a smaller copy of the same picture, not a rendition: the packing and the
@@ -167,18 +232,61 @@ impl Image {
             data: Arc::new(data),
             colour: self.colour,
             scale: self.scale,
+            // Different pixels, so the picture's own peak is not this one's.
+            light: Light::of(self.light.reference_nits()),
         }
     }
 }
 
-/// The rendition a file gets: sRGB 8-bit, clipped at the SDR peak.
+/// The rendition a file gets: sRGB 8-bit, with the light above SDR white rolled off.
 ///
-/// Which curve an export should use is the export design's question, not this one; clip is
-/// what the tool has always produced, so a save looks the way it did before.
+/// BT.2390 keeps everything below its knee untouched and brings the rest down into the
+/// destination, so a highlight survives as a gradient instead of the flat white clipping
+/// leaves. A picture whose peak is not above the file's white is unchanged by it.
 const SDR_FILE_DESTINATION: Destination = Destination {
     domain: Domain::Encoded,
-    tone: ToneMapping::Clip,
+    tone: ToneMapping::Bt2390,
 };
+
+/// The brightest channel in a picture, in nits; `None` when its codes say nothing absolute.
+///
+/// A float row is scRGB half floats, where 1.0 is 80 nits; a PQ row decodes to a fraction of
+/// 10000. Alpha is skipped because it says nothing about light.
+pub fn brightest_nits(pixels: &[u8], colour: ContentColour) -> Option<f32> {
+    let brightest = match colour.storage {
+        PixelStorage::Float16 => {
+            pixels
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|texel| {
+                    (0..3)
+                        .map(|channel| {
+                            let low = texel[channel * 2];
+                            let high = texel[channel * 2 + 1];
+                            half_to_f32(u16::from_le_bytes([low, high]))
+                        })
+                        .fold(0.0f32, f32::max)
+                })
+                .fold(0.0f32, f32::max)
+                * SCRGB_WHITE_NITS
+        }
+        _ if colour.transfer == TransferFunction::Pq => {
+            pixels
+                .chunks_exact(colour.storage.bytes_per_texel())
+                .map(|texel| {
+                    let (codes, _) = colour.storage.unpack(texel);
+                    (0..3)
+                        .map(|channel| colour.transfer.decode(codes[channel]))
+                        .fold(0.0f32, f32::max)
+                })
+                .fold(0.0f32, f32::max)
+                * 10_000.0
+        }
+        _ => return None,
+    };
+    Some(brightest)
+}
 
 /// A region of an [`Image`], in the picture's own packing.
 pub struct Cropped {
@@ -191,14 +299,44 @@ pub struct Cropped {
     pub colour: ContentColour,
     /// What the picture's points were worth when it was cropped, for the file's density.
     pub scale: f32,
+    /// How much light the region holds; measured away from the capture, never on it.
+    pub light: Light,
 }
 
 impl Cropped {
+    /// Measure the brightest channel in the picture and record it, in nits.
+    ///
+    /// One pass over the pixels, so a pin queues this on the job worker rather than running
+    /// it where the capture lands. Codes relative to a display's white have nothing to
+    /// measure, and answer `None`.
+    pub fn measure_peak(&self) -> Option<f32> {
+        if let Some(peak) = self.light.peak_nits() {
+            return Some(peak);
+        }
+        let nits = brightest_nits(&self.data, self.colour)?;
+        self.light.measured(nits);
+        Some(nits)
+    }
+
+    /// The transform a file written from this region gets.
+    ///
+    /// Tone mapping is bounded by the picture's own peak once that has been measured; one
+    /// nobody measured is measured here, since a file is where the answer is needed. A pin
+    /// measures on the job worker when it appears, so this normally finds it ready.
+    fn file_placement(&self) -> Placement {
+        let peak = self.measure_peak();
+        let colour = match peak {
+            Some(peak) => self.colour.with_peak(peak),
+            None => self.colour,
+        };
+        colour.placement(SDR_FILE_DESTINATION)
+    }
+
     /// The region as sRGB 8-bit RGBA: what every file format this tool writes takes.
     ///
     /// Borrowed when the picture is already SDR, so the common case copies nothing.
     pub fn rendition(&self) -> std::borrow::Cow<'_, [u8]> {
-        let placement = self.colour.placement(SDR_FILE_DESTINATION);
+        let placement = self.file_placement();
         if placement.is_identity() {
             return std::borrow::Cow::Borrowed(self.data.as_slice());
         }
@@ -211,7 +349,7 @@ impl Cropped {
             rgba.extend_from_slice(&[byte(r), byte(g), byte(b), byte(alpha)]);
         };
         // A float picture is the one case a file sees with its light still above white; the
-        // placement clips it to the SDR peak, as every file this tool writes is SDR.
+        // placement rolls it into the SDR white, as every file this tool writes is SDR.
         if source == 8 {
             for texel in self.data.as_chunks::<8>().0 {
                 convert(texel, &mut rgba);
@@ -236,19 +374,22 @@ impl Cropped {
             data: Arc::new(self.rendition().into_owned()),
             colour: ContentColour::SDR,
             scale: self.scale,
+            light: Light::sdr(),
         }
     }
 
     /// One texel as straight sRGB bytes, converted like `rendition`; `None` outside the
-    /// region. What an eyedropper reads.
+    /// region. What an eyedropper reads: a press converts the one texel, not the picture.
     pub fn texel(&self, x: usize, y: usize) -> Option<[u8; 4]> {
         if x >= self.width as usize || y >= self.height as usize {
             return None;
         }
-        let rgba = self.rendition();
-        let index = (y * self.width as usize + x) * 4;
-        let texel = rgba.get(index..index + 4)?;
-        Some([texel[0], texel[1], texel[2], texel[3]])
+        let texel = self.colour.storage.bytes_per_texel();
+        let index = (y * self.width as usize + x) * texel;
+        let bytes = self.data.get(index..index + texel)?;
+        let [r, g, b, alpha] = self.file_placement().texel(bytes);
+        let byte = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+        Some([byte(r), byte(g), byte(b), byte(alpha)])
     }
 }
 
@@ -418,6 +559,7 @@ mod tests {
             data: Arc::new(data),
             colour: ContentColour::SDR,
             scale: 1.0,
+            light: Light::sdr(),
         }
     }
 
@@ -478,6 +620,7 @@ mod tests {
             },
             output: None,
             scale: 1.0,
+            reference_nits: 0.0,
         };
         let image = frame.into_image();
         let (codes, alpha) = PixelStorage::Packed10.unpack(&image.data[0..4]);
@@ -508,6 +651,7 @@ mod tests {
             colour: ContentColour::scrgb(1000.0),
             output: None,
             scale: 1.0,
+            reference_nits: 0.0,
         };
         let image = frame.into_image();
         assert_eq!(
@@ -521,6 +665,66 @@ mod tests {
             (values[0], alpha),
             (8.0, 1.0),
             "the light above white was reduced at ingest"
+        );
+    }
+
+    /// A PQ picture is measured in nits, not in codes: the brightest channel decodes through
+    /// the curve before it is compared with the display's white.
+    #[test]
+    fn a_picture_in_pq_codes_is_measured_in_nits() {
+        let red = (TransferFunction::Pq.encode(1000.0 / 10_000.0) * 1023.0).round() as u32;
+        // Red is bits 0-9 and the undefined alpha is made opaque; green and blue stay zero.
+        let word = red | 0xc000_0000;
+        let colour = ContentColour {
+            storage: PixelStorage::Packed10,
+            primaries: ui_core::colour::Chromaticities::BT2020,
+            transfer: TransferFunction::Pq,
+            max_nits: 1000.0,
+        };
+        let nits = brightest_nits(&word.to_le_bytes(), colour).expect("PQ codes are absolute");
+        assert!((nits - 1000.0).abs() < 5.0, "measured {nits} nits");
+        assert_eq!(
+            brightest_nits(&[0u8; 4], ContentColour::SDR),
+            None,
+            "sRGB codes say nothing about how much light there is"
+        );
+    }
+
+    /// A measured float picture is rolled off into the file's white rather than clipped flat:
+    /// this desktop's white and a brighter highlight keep different codes, which clipping
+    /// would collapse into one.
+    #[test]
+    fn a_measured_picture_rolls_its_highlights_into_the_file_white() {
+        // 3.0 is 240 nits in scRGB, this display's SDR white; 12.5 is 1000 nits; 1.0 is opaque.
+        let texel = |light: u16| [light, light, light, 0x3c00].map(u16::to_le_bytes).concat();
+        let frame = Frame {
+            width: 2,
+            height: 1,
+            stride: 16,
+            pixels: [texel(0x4200), texel(0x4a40)].concat(),
+            format: PixelFormat::Rgba16F,
+            colour: ContentColour::scrgb(1000.0),
+            output: None,
+            scale: 1.0,
+            reference_nits: 240.0,
+        };
+        let cropped = frame.into_image().crop(Rect::new(0.0, 0.0, 2.0, 1.0));
+        assert_eq!(cropped.light.peak_nits(), None, "nothing measured it yet");
+
+        let rgba = cropped.rendition();
+        assert_eq!(rgba.len(), 8);
+        assert!(
+            rgba[0] < rgba[4],
+            "the white ({}) and the highlight ({}) landed on one code",
+            rgba[0],
+            rgba[4]
+        );
+        assert_eq!(rgba[4], 255, "the peak lands at the file's white");
+        assert_eq!(rgba[3], 255, "converting a float texel keeps its alpha");
+        assert_eq!(
+            cropped.light.peak_nits(),
+            Some(1000.0),
+            "the rendition measured the picture it wrote"
         );
     }
 }

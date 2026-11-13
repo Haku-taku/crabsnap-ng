@@ -6,7 +6,8 @@
 //! protocol.
 
 pub use crabsnap_core::capture::{
-    Cropped, Frame, Image, Pending, Started, density, pixels_per_metre, png_scale, read_png,
+    Cropped, Frame, Image, Light, Pending, Started, brightest_nits, density, pixels_per_metre,
+    png_scale, read_png,
 };
 pub use crabsnap_platform::capture::{Session, open};
 
@@ -25,6 +26,7 @@ mod tests {
             data: std::sync::Arc::new(data),
             colour: ui_core::colour::ContentColour::SDR,
             scale: 1.0,
+            light: Light::sdr(),
         }
     }
 

@@ -80,6 +80,12 @@ pub(crate) trait PinContent {
         Vec::new()
     }
 
+    /// Queue whatever this kind has to measure off the frame's thread.
+    ///
+    /// Called once, when the pin is added, with the worker the canvas already runs jobs on;
+    /// the result is read back by whatever it feeds, so nothing waits for it in a frame.
+    fn measure(&self, _jobs: &ui_platform::jobs::Jobs) {}
+
     /// Do what one of this kind's own rows asked; the canvas has handled the shared rows.
     fn act(&mut self, _item: Id) -> bool {
         false
@@ -280,6 +286,9 @@ fn decode_picture(
         // Only a PNG states the density it was saved at, and that is the one thing a
         // re-encode through another decoder would lose.
         scale,
+        // A file does not say which display will show it, so the model's own white decides
+        // whether its light counts as more than SDR.
+        light: crate::capture::Light::of(ui_core::colour::SDR_WHITE_NITS),
     };
     let full = ui_core::geom::Rect::new(0.0, 0.0, image.width as f32, image.height as f32);
     Ok(image.crop(full))
@@ -438,6 +447,7 @@ mod tests {
                 data: std::sync::Arc::new(vec![255u8, 0, 0, 255]),
                 colour: ui_core::colour::ContentColour::SDR,
                 scale: 1.0,
+                light: crate::capture::Light::sdr(),
             };
             image
                 .crop(ui_core::geom::Rect::new(0.0, 0.0, 1.0, 1.0))

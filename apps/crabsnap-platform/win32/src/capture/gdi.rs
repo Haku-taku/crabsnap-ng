@@ -50,6 +50,8 @@ impl Backend for Blit {
             // A GDI copy has no alpha channel: the fourth byte is zero, not transparent.
             format: PixelFormat::Bgrx8,
             colour: ContentColour::SDR,
+            // A GDI blit is the compositor's 8-bit surface: it carries no absolute light.
+            reference_nits: 0.0,
             output: Some(self.monitor.device.clone()),
             scale: self.monitor.scale,
         })

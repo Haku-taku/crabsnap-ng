@@ -578,6 +578,7 @@ mod tests {
             data: Arc::new(data),
             colour: ContentColour::SDR,
             scale: 1.0,
+            light: crate::capture::Light::sdr(),
         }
     }
 
@@ -658,6 +659,7 @@ mod tests {
             data: Arc::new(data),
             colour: ContentColour::SDR,
             scale: 1.0,
+            light: crate::capture::Light::sdr(),
         };
         let source = source(&image);
         let disc = bake(&source, Aim::at(Point::new(20.0, 20.0)), 3, 120);
@@ -751,6 +753,7 @@ mod tests {
             data: Arc::new(data),
             colour: ContentColour::SDR,
             scale: 1.0,
+            light: crate::capture::Light::sdr(),
         };
         let source = source(&image);
         let aim = Aim::at(Point::new(32.0, 32.0));

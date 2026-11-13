@@ -286,11 +286,20 @@ knows a fact about its own material declares it here.
 
 ### HDR (bitmap)
 
-`Bitmap` holds the picture's `ContentColour`. A picture is HDR when its transfer
-function can express more than SDR — `TransferFunction::is_hdr()`
-(`ui/crates/ui-core/src/colour.rs:98`) — not when `max_nits` happens to be set:
-the display's own 203-nit reference travels with a capture and says nothing
-about the content.
+`Bitmap` holds the picture's `ContentColour` and its `Light`. A picture is HDR
+when its brightest channel, measured from the pixels, is above the display's SDR
+white — not when its transfer function can express more light. A float capture
+of an SDR desktop is scRGB and holds nothing above white; a PQ capture of one is
+tagged HDR without a single highlight. The display's own white travels with the
+capture and is the ruler the measurement is read against, so it is a fact about
+the picture rather than a claim the file makes.
+
+The measurement is one pass over the pixels, and it runs on the engine's job
+worker (`PinContent::measure`) once the pin is on screen: the pixels are shared
+through the `Arc` the texture already uploads from, and the wake that follows
+brings the badge in on the next frame. Until it lands the picture wears nothing
+— an unmeasured picture is not guessed at. An export measures the picture itself
+when the worker has not.
 
 | Badge | Label | Anchor | Policy | `Show` | Tone |
 | --- | --- | --- | --- | --- | --- |
@@ -298,8 +307,8 @@ about the content.
 | hdr-detail | `PQ · BT.2020 · 1000 nit` | NorthWest | Preferred | `AdvancedOnly` | `Error` |
 
 The detail is data, built by a pure formatter: the transfer's name, the
-primaries' name, and the peak when the file states one. It is capped at 48
-characters with a middle ellipsis, because a badge is a chip, not a banner.
+primaries' name, and the measured peak. It is capped at 48 characters with a
+middle ellipsis, because a badge is a chip, not a banner.
 
 The labels `HDR` and `Clipboard` are user-visible strings and live in the
 catalogs (`pin-badge-*`); transfer and primaries names (`PQ`, `BT.2020`) are the
@@ -385,9 +394,10 @@ Pure logic, unit-tested in `apps/crabsnap/src/pin/badge.rs`:
 - `a_chip_is_tinted_glass_unless_it_asks_for_flat_paint` — the default is a
   translucent tint of the tone over a blur; a flat chip is opaque and samples
   nothing; a custom tone carries its own ink.
-- `an_hdr_picture_says_so_and_a_plain_one_does_not` — a PQ picture declares the
-  error-toned pair, an sRGB one declares none even with a peak set, and the
-  detail names the curve, the primaries and the peak.
+- `only_light_measured_above_the_display_white_says_hdr` — a picture measured
+  above the display's white declares the error-toned pair and the detail names
+  the curve, the primaries and the peak; a float capture measured at or below
+  it declares none, and so does one nobody has measured.
 - `an_origin_names_the_file_it_came_from` — a file names itself and keeps the
   path behind the reveal key, a selection names itself and its MIME, a capture
   states only its output name, a colour says nothing.
@@ -447,6 +457,17 @@ now drawn in `badge.rs` from `badge_spec(true)` — the same height, padding and
 type — so the numbers still come from one place while the surface is the
 app's. `a_chip_is_tinted_glass_unless_it_asks_for_flat_paint` pins the material
 and tone; a visual check covers what a unit test cannot.
+
+**The transfer function decided whether a picture was HDR.** `hdr_badges` read
+`TransferFunction::is_hdr()`, reasoning that the display's peak travels with a
+capture and says nothing about the content. That got it wrong in both
+directions once Windows presented HDR: a capture of the advanced-colour desktop
+arrives as scRGB float light, whose transfer is linear, so the badge vanished
+exactly where it was true, while a PQ-tagged capture of a grey desktop kept a
+claim nothing in its pixels supported. What decides now is a peak measured from
+the pixels against the display's own white, computed on the job worker so the
+frame that shows the pin never waits for it
+(`only_light_measured_above_the_display_white_says_hdr`).
 
 **The zoom chip stayed forever.** The first paint drew the chip at south-east
 for as long as the pin was zoomed, which put it over the corner the user was

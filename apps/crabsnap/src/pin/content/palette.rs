@@ -887,6 +887,7 @@ mod tests {
             data: Arc::new(data),
             colour: ui_core::colour::ContentColour::SDR,
             scale: 1.0,
+            light: crate::capture::Light::sdr(),
         };
         let palette =
             Palette::from_picture(&image, Some("shot.png".into()), 2).expect("a picture quantizes");
@@ -902,6 +903,7 @@ mod tests {
             data: Arc::new(Vec::new()),
             colour: ui_core::colour::ContentColour::SDR,
             scale: 1.0,
+            light: crate::capture::Light::sdr(),
         };
         assert!(Palette::from_picture(&blank, None, 8).is_err());
     }

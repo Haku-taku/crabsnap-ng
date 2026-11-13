@@ -83,6 +83,7 @@ pub(crate) fn frame_of(frame: ScreenFrame) -> Frame {
         pixels: frame.pixels,
         format,
         colour: frame.colour,
+        reference_nits: frame.reference_nits,
         output: Some(frame.output),
         scale: frame.scale,
     }

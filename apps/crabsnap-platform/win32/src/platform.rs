@@ -9,7 +9,6 @@
 pub mod capture;
 pub mod channel;
 pub mod paths;
-pub mod shim;
 
 pub use channel::{Client, ClientError, address};
 

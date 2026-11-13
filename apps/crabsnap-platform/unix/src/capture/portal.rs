@@ -199,6 +199,8 @@ fn decode_png(bytes: &[u8]) -> Result<Frame, String> {
         output: None,
         // Nor does it say what a point was worth; a PNG pixel is taken as a point.
         scale: 1.0,
+        // sRGB codes are relative to a white nobody stated, so there is nothing to measure.
+        reference_nits: 0.0,
     })
 }
 

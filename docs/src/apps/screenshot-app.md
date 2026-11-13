@@ -540,11 +540,13 @@ the paragraph, and the field is a transparent keyboard stop over the same box
 that adds the caret and the selection. Editing and the exported file are one
 rendering because they are one list.
 
-An HDR frame whose selection carries marks is converted to the SDR rendition a
-file gets (`Cropped::sdr`) before the marks go on: that rendition is what every
-file format here writes anyway, so the alternative was a file missing the
-marks. A pin still refuses an HDR picture with marks when it exports, because a
-flatten has no linear target.
+A selection that carries marks and is not already 8-bit sRGB is converted to the
+SDR rendition a file gets (`Cropped::sdr`) before the marks go on: that rendition
+is what every file format here writes anyway, so the alternative was a file
+missing the marks. A bare selection leaves native, and the worker that writes it
+converts once. A pin still refuses an HDR picture with marks when it exports,
+because a flatten has no linear target; its measurement runs first, so the
+refusal is read from the picture rather than from its tagging.
 
 **D7 — Pins are one canvas per output.** All pins of an output live in a single
 layer surface the size of that output, placed once at its origin. The earlier
@@ -618,7 +620,7 @@ later.
 | A surface input region | A pin's transparent padding used to swallow clicks meant for the desktop under it | Done: the engine derives the region from the hit index and publishes it on layer surfaces ([Pointer model](../engine/pointer-model.md#the-surfaces-input-shape)); a `PassThrough` root with opaque pins publishes exactly the pins' rectangles, which is what the pin canvas is built on |
 | The fixed end of a drag | Moving a surface with its own pointer input feeds back and drifts; an object moves inside a still surface instead | Done: `Cx::press_origin()`, the press position in surface coordinates, fixed for the gesture |
 | A line and an ellipse shape | Annotation arrows and ellipse tools cannot be approximated by rects | Done: `Shape::Line` declares the scene's stroked segment, and `Shape::Ellipse` a filled and/or stroked ellipse; the CPU rasteriser and a GPU shader both derive coverage from one distance estimate, held to 3 LSB by the dual-backend scene check |
-| A rendition for 10-bit captures | An HDR output's shm capture is PQ-encoded BT.2020, so truncating it to 8 bits is neither sRGB nor the desktop | Done where the pixels are needed, not at ingest: `wp_color_manager_v1` states the output's primaries, transfer function and peak, `color.rs` reads it into a `ContentColour`, and `Image`/`Cropped` keep the native words. A file gets `Cropped::rendition`: decode, convert the stated primaries into sRGB, encode, with both transfer functions tabulated — 70 ms for a 2560×1440 frame against 348 ms untabulated, measured in release on this machine. Measured against an independent implementation of the same steps: within 1 LSB, two at the very bottom of the curve, except the most saturated primaries, whose cross-channel leakage is the gamut conversion itself |
+| A rendition for 10-bit captures | An HDR output's shm capture is PQ-encoded BT.2020, so truncating it to 8 bits is neither sRGB nor the desktop | Done where the pixels are needed, not at ingest: `wp_color_manager_v1` states the output's primaries, transfer function and peak, `color.rs` reads it into a `ContentColour`, and `Image`/`Cropped` keep the native words. A file gets `Cropped::rendition`: decode, convert the stated primaries into sRGB, roll what is above the file's white off with BT.2390 bounded by the picture's measured peak, encode. Both transfer functions are tabulated — 70 ms for a 2560×1440 frame against 348 ms untabulated, measured in release on this machine; a picture above the file's white also runs the curve per texel, which is not tabulated and is measured on the save worker rather than on the frame. Measured against an independent implementation of the same steps: within 1 LSB, two at the very bottom of the curve, except the most saturated primaries, whose cross-channel leakage is the gamut conversion itself |
 | Surfaces that match an HDR output | An SDR surface on an HDR output is mapped by the compositor with a curve the app cannot see, so its own colours are not the ones the display receives | Done: `GpuWindow::open` asks `WaylandWindow::declare_hdr_surface`, which reads the output's luminances and transfer function, declares the output's own description, and presents f16 encoded to PQ at that output's reference white and gamut; `SurfaceColour::Sdr` opts out. A pinned chart captured from the output returns to its own colours, the same 1-LSB agreement as the tone-map row |
 | Offscreen canvas on the GPU | Annotation baking and caching must not round-trip through CPU memory | Not started; render into an `OffscreenFbo`, read back only when exporting |
 | Zero-copy dma-buf capture | A whole output crosses the CPU once per grab through shm | Not started; this compositor offers `zwp_linux_dmabuf_v1` v5, so the capture side is available, but the engine's image source is `Arc<Vec<u8>>` — it needs a texture source imported from a dma-buf, and saving still needs a mapped read of the same buffer |
@@ -950,6 +952,16 @@ armed. What catches it now:
 `an_open_bezier_path_is_one_step_of_history`,
 `a_box_runs_through_the_control_points` and
 `escape_leaves_the_tool_and_the_selection_to_their_own_chords`.
+
+**A file clipped the light the display could show.** Every export was written
+with `ToneMapping::Clip`: anything above the file's SDR white landed on 1.0, so
+a desktop's white and a specular highlight in the same capture came out as one
+flat code and the file lost the light the capture had kept for it. A file now
+rolls off with BT.2390 against its own white, bounded by the peak measured from
+the picture rather than by the display's stated peak, which is a capability and
+not the content's range. Saving a capture with no pin measures it once, on the
+worker; a pin's peak is measured when it appears, so no frame waits for either.
+Caught by `a_measured_picture_rolls_its_highlights_into_the_file_white`.
 
 ## See also
 

@@ -128,6 +128,7 @@ mod tests {
             data: Arc::new([253u8, 0, 0, 255].repeat(4)),
             colour: ContentColour::SDR,
             scale: 1.0,
+            light: crate::capture::Light::sdr(),
         };
         let picture = image.crop(ui_core::geom::Rect::new(0.0, 0.0, 2.0, 2.0));
         let avif = ffmpeg.encode(&format, &picture, &[]).expect("an AVIF");

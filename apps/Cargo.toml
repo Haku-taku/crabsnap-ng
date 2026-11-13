@@ -5,6 +5,7 @@ members = [
     "crabsnap",
     "crabsnap-core",
     "crabsnap-platform",
+    "crabsnap-platform/ffmpeg",
     "crabsnap-platform/unix",
     "crabsnap-platform/win32",
 ]

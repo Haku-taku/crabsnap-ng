@@ -87,12 +87,16 @@ PNG is built in. The other offered formats — `jpg`, `webp`, `avif`, `jxl`, `ti
 `qoi` — are ffmpeg's: the container, the encoder, its pixel formats and its parameter list all
 come from libavformat and libavcodec at startup, and the picture is encoded in this process
 through a C shim compiled against the ffmpeg headers on the build machine
-(`apps/crabsnap-platform/unix/ffi/ffmpeg_shim.c`). The shim lives in the Unix platform crate
-because `dlopen` names a Unix loader; the Windows crate answers the same functions with
-"absent", so there PNG is the only format and a decode falls back to this build's own PNG
-reader. The shim dlopens the libraries by versioned soname and
-refuses a major that differs from its headers, so the binary neither links them nor fails to
-start without them; a build with no headers compiles a stub with the same symbols. When the
+(`apps/crabsnap-platform/ffmpeg/ffi/ffmpeg_shim.c`). One crate serves both targets, because the
+loader has a branch per platform: `dlopen` by versioned soname on Unix, `LoadLibraryExW` by
+versioned file name on Windows, which also opens avcodec and avutil beside avformat — on ELF a
+name reaches libavformat's dependencies, and `GetProcAddress` reaches nothing but its own module.
+Both branches refuse a major that differs from the headers, so the binary neither links the
+libraries nor fails to start without them; a build with no headers compiles a stub with the same
+symbols. Where the headers are is the platform's question, and Windows has no registry to ask:
+`CRABSNAP_FFMPEG_INCLUDE` names a directory holding `libavcodec/avcodec.h`, e.g. `mingw64\include`
+of an MSYS2 install, and the DLLs of the same major — `avformat-<major>.dll` and its companions
+in `mingw64\bin` — are what is loaded at run time. When the
 libraries cannot be used, the `ffmpeg` program — on `PATH`, or at `[codec] program` — is the
 fallback, and it is the only process this tool ever starts. The libraries are looked for in
 `[codec] library_directory` first and then along the dynamic loader's own search path. A
@@ -362,7 +366,7 @@ each with a one-call whole-image API, on the grounds that any other route meant 
 library at run time. That held while the tool offered three formats. Covering what ffmpeg can
 write — avif, jxl, tiff, gif, qoi — needs the encoder table, its pixel formats and its options,
 which only libavcodec knows, so the app now builds
-`apps/crabsnap-platform/unix/ffi/ffmpeg_shim.c` against the headers installed on the build
+`apps/crabsnap-platform/ffmpeg/ffi/ffmpeg_shim.c` against the headers installed on the build
 machine. Every layout is correct by construction, the library's
 major is checked against those headers when it loads, and a build without headers compiles
 `ffi/ffmpeg_shim_stub.c`, which answers "unavailable" so the program fallback takes over.
@@ -401,6 +405,16 @@ them. The test suite runs its tests in parallel, two of them probe, and one thre
 state is now never unmapped — a re-probe keeps its own reference and the published pointers stay
 callable — and publishing sits behind a mutex. A crash-free parallel suite is what notices a
 return to unloading.
+
+**Windows resolves one module at a time, and its search flag takes no forward slash.**
+`GetProcAddress` reads one module and stops, so `avcodec_version` and the pixel-format table are
+invisible through the `avformat` handle that `dlsym` reaches on ELF; the shim opens avcodec and
+avutil beside it and looks through all three. The configured directory then failed with "module
+not found" for a file that was there: `LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR` takes only a Windows
+path, and a forward slash turns the whole string into a module name, where the plain flags
+normalise it. The join uses the target's separator now, and a failed load names the path it tried
+rather than the bare library name. `info formats` with `library_directory` set and the DLL
+directory off `PATH` is what catches it.
 
 **A shortcut field hid the default it would use.** The settings window put the default chord in
 the field's placeholder, so an untouched action showed an empty box: MD3 draws a placeholder only

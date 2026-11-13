@@ -205,10 +205,14 @@ impl Program {
 }
 
 /// The first `ffmpeg` on `PATH`, the way a shell would find it.
+///
+/// The suffix is the platform's: Windows stores `ffmpeg.exe`, and a bare `ffmpeg` is not a
+/// file there, so searching the bare name finds nothing on the one platform that needs it most.
 pub fn find() -> Option<PathBuf> {
+    let name = format!("ffmpeg{}", std::env::consts::EXE_SUFFIX);
     let paths = std::env::var_os("PATH")?;
     std::env::split_paths(&paths)
-        .map(|directory| directory.join("ffmpeg"))
+        .map(|directory| directory.join(&name))
         .find(|candidate| candidate.is_file())
 }
 
