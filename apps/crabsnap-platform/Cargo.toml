@@ -9,6 +9,11 @@ description = "Platform-bound half of the screenshot app: the local channel to t
 [lib]
 path = "src/crabsnap_platform.rs"
 
-[dependencies]
-crabsnap-core = { path = "../crabsnap-core" }
-rustix = { version = "1", features = ["event", "net"] }
+# One channel per target, never both: the Unix one binds a socket path, the Windows one a
+# named pipe, and neither compiles on the other's platform. This is where the app's choice is
+# made, so that its own source makes none.
+[target.'cfg(unix)'.dependencies]
+crabsnap-platform-unix = { path = "unix" }
+
+[target.'cfg(windows)'.dependencies]
+crabsnap-platform-win32 = { path = "win32" }

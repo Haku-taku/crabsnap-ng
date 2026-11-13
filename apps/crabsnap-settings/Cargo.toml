@@ -18,8 +18,8 @@ crabsnap-core = { path = "../crabsnap-core" }
 crabsnap-platform = { path = "../crabsnap-platform" }
 ui-core = { path = "../../ui/crates/ui-core" }
 ui-i18n = { path = "../../ui/crates/ui-i18n" }
+ui-host = { path = "../../ui/crates/ui-host" }
 ui-platform = { path = "../../ui/crates/ui-platform" }
-ui-platform-wayland = { path = "../../ui/crates/ui-platform-wayland", features = ["gpu", "system-fonts"] }
 ui-design = { path = "../../ui/crates/ui-design" }
 ui-style = { path = "../../ui/crates/ui-style" }
 ui-widgets = { path = "../../ui/crates/ui-widgets" }

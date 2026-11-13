@@ -698,6 +698,19 @@ protocol types, and the settings schema. The platform shell is a new crate or a
 migration note already describes the shape; the difference is that the Windows
 shell also owns capture and the tray, which have no engine contract.
 
+The first two pieces are done. An app opens its backend through
+`ui_host::connect`, which is the one name for the per-target choice, and reads
+the system's language list from `Host::languages`: Windows keeps that list in
+its own settings, while the POSIX environment is only the Unix answer. The
+settings window runs on that today — it was built and run on this machine, and
+the form came up with the system's Chinese catalogue. `crabsnap-platform` is a
+facade over `crabsnap-platform-unix` and `crabsnap-platform-win32`, chosen by
+target tables exactly as `ui-host` chooses a backend; the Unix client type-checks
+for Linux and the Windows one is a message-mode named pipe scoped to the logon
+session, where `WaitNamedPipe` with a zero timeout answers whether a daemon
+exists and `CallNamedPipe` carries one request and one answer. `crabsnap` itself
+still names Wayland in its capture, colour, daemon, hotkey and path modules.
+
 The daemon runs as the user, not as a service. It owns the pipe, the clipboard,
 the hotkeys, the tray icon, and the output list, and it creates surfaces on
 demand. The CLI is a console program that connects to the pipe and prints; it
@@ -847,6 +860,7 @@ flaky test.
 | Clipboard, drag-and-drop, hotkeys | A copy carries text, HTML, a file list and a picture, each as every Windows format it needs; a paste is text only; hotkeys done through `RegisterHotKey` against a message-only window; drag-and-drop and delayed rendering planned |
 | Named-pipe IPC | Server done: message mode verified by `host_services`, where a client connects, sends one message and reads the answer; a worker's deferred reply is implemented but unexercised |
 | Capture via WGC and Desktop Duplication | Desktop Duplication done: one named or primary output, from a device on its adapter, f16 composed surface converted to SDR sRGB, rotation and DPI scale carried on the frame; verified against a chart of known codes on an auto colour managed desktop. HDR highlights clip, several outputs are not assembled, and WGC, the border behaviour and `WDA_EXCLUDEFROMCAPTURE` are planned |
+| The app on Windows | Started: `ui_host::connect` and `Host::languages` give an app one way in, the settings window builds and runs here, and `crabsnap-platform` is a facade over a Unix socket client and a Windows named-pipe client. `crabsnap` itself still names Wayland in capture, colour, daemon, hotkeys and paths; the tray and the ffmpeg shim are unstarted |
 | IME | Composition done through IMM32: open status from the frame's `ImeState`, composition and candidate windows at the caret, preedit and commit as engine events; surrounding text and `DeleteSurrounding` need TSF |
 | Packaging and signing | Planned |
 | Vulkan | Not planned; see [Is Vulkan the right renderer?](#vulkan) |

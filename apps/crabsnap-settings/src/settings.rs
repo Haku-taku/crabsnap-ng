@@ -21,7 +21,6 @@ use ui_platform::host::{Host, OpenOptions};
 use ui_platform::hotkeys::parse_chords;
 use ui_platform::view::App;
 use ui_platform::window::SurfaceSpec;
-use ui_platform_wayland::WaylandBackend;
 use ui_style::{Env, StyleScope};
 use ui_widgets::Cx;
 use ui_widgets_md3::{
@@ -50,8 +49,6 @@ fn shortcut_id(name: &'static str) -> Id {
 /// without a window.
 pub fn run() -> Result<(), String> {
     let config = Config::load()?;
-    let language = load_language(&config)?;
-    let catalog = language.catalog();
     if let Some(script) = Script::parse(std::env::args().skip(1))? {
         let mut config = config;
         script.apply(&mut config)?;
@@ -59,12 +56,17 @@ pub fn run() -> Result<(), String> {
         println!("{}", config::Config::path().display());
         return Ok(());
     }
+    // The backend comes first because the window's language list is the system's, and the
+    // system answers through it: Windows keeps that list in its own settings, not the locale
+    // variables a POSIX session exports.
+    let mut host = Host::new(Box::new(ui_host::connect()?));
+    let language = load_language(&config, &host.languages())?;
+    let catalog = language.catalog();
     let title = catalog.text_by_id("title").to_string();
     let deadline = std::env::var("CRABSNAP_SECONDS")
         .ok()
         .and_then(|value| value.parse::<f32>().ok())
         .map(|seconds| Instant::now() + Duration::from_secs_f32(seconds));
-    let backend = WaylandBackend::connect().map_err(|error| format!("wayland: {error}"))?;
     let settings = Settings {
         shortcuts: Shortcut::ALL
             .iter()
@@ -98,7 +100,6 @@ pub fn run() -> Result<(), String> {
         status: None,
         close: false,
     };
-    let mut host = Host::new(Box::new(backend));
     host.open(
         SurfaceSpec::window("dev.crabsnap.settings", title, (640, 740)),
         settings,
@@ -121,7 +122,7 @@ fn environment(language: &Arc<Language>) -> Arc<Env> {
 /// The window's language: `[ui] language`, then the system's list.
 ///
 /// A configured value that does not parse is skipped, exactly as the other binaries do.
-fn load_language(config: &Config) -> Result<Arc<Language>, String> {
+fn load_language(config: &Config, system: &[String]) -> Result<Arc<Language>, String> {
     let choice = match config.ui.language.as_deref() {
         None => LanguageChoice::Auto,
         Some(tag) => LanguageChoice::parse(tag).unwrap_or_else(|error| {
@@ -129,8 +130,7 @@ fn load_language(config: &Config) -> Result<Arc<Language>, String> {
             LanguageChoice::Auto
         }),
     };
-    let system = ui_platform::posix_system_languages();
-    Language::from_sources(choice, &system, &[("en", EN), ("zh-CN", ZH_CN)])
+    Language::from_sources(choice, system, &[("en", EN), ("zh-CN", ZH_CN)])
         .map_err(|error| error.to_string())
 }
 

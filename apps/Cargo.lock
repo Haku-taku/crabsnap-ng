@@ -439,8 +439,24 @@ dependencies = [
 name = "crabsnap-platform"
 version = "0.1.0"
 dependencies = [
+ "crabsnap-platform-unix",
+ "crabsnap-platform-win32",
+]
+
+[[package]]
+name = "crabsnap-platform-unix"
+version = "0.1.0"
+dependencies = [
  "crabsnap-core",
  "rustix",
+]
+
+[[package]]
+name = "crabsnap-platform-win32"
+version = "0.1.0"
+dependencies = [
+ "crabsnap-core",
+ "windows",
 ]
 
 [[package]]
@@ -451,9 +467,9 @@ dependencies = [
  "crabsnap-platform",
  "ui-core",
  "ui-design",
+ "ui-host",
  "ui-i18n",
  "ui-platform",
- "ui-platform-wayland",
  "ui-style",
  "ui-widgets",
  "ui-widgets-md3",
@@ -2135,12 +2151,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "ui-gpu-d3d11"
+version = "0.1.0"
+dependencies = [
+ "ui-gpu-scene",
+ "windows",
+]
+
+[[package]]
 name = "ui-gpu-egl"
 version = "0.1.0"
 dependencies = [
  "glow",
  "khronos-egl",
  "libc",
+ "ui-gpu-scene",
+]
+
+[[package]]
+name = "ui-gpu-scene"
+version = "0.1.0"
+dependencies = [
+ "ui-core",
 ]
 
 [[package]]
@@ -2151,6 +2183,15 @@ dependencies = [
  "tree-sitter-highlight",
  "tree-sitter-json",
  "tree-sitter-rust",
+]
+
+[[package]]
+name = "ui-host"
+version = "0.1.0"
+dependencies = [
+ "ui-platform",
+ "ui-platform-wayland",
+ "ui-platform-win32",
 ]
 
 [[package]]
@@ -2195,7 +2236,7 @@ version = "0.1.0"
 dependencies = [
  "glow",
  "ui-core",
- "ui-gpu-egl",
+ "ui-gpu-scene",
 ]
 
 [[package]]
@@ -2219,6 +2260,7 @@ dependencies = [
  "rustix",
  "tempfile",
  "ui-core",
+ "ui-gpu-egl",
  "ui-paint",
  "ui-paint-gpu",
  "ui-platform",
@@ -2229,6 +2271,18 @@ dependencies = [
  "wayland-protocols-wlr",
  "xkbcommon",
  "zbus",
+]
+
+[[package]]
+name = "ui-platform-win32"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "ui-core",
+ "ui-gpu-d3d11",
+ "ui-gpu-scene",
+ "ui-platform",
+ "windows",
 ]
 
 [[package]]
