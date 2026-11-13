@@ -1,0 +1,83 @@
+# Documentation Rules
+
+Applies to everything under `docs/src/`. Mechanics are in `docs/AGENTS.md`; structure is in
+`.conventions/CONVENTIONS.md`.
+
+## Voice
+
+- Direct and concrete. Short sentences. The reader is a contributor scanning for one fact.
+- Present tense: "The engine holds the node", not "will hold".
+- Second person for instructions ("run the self-test"), impersonal for descriptions ("the tree
+  keeps the parent link").
+- State limitations plainly and move on. No hedging ("simply", "just", "easily"), no promotional
+  language ("powerful", "seamless"), no meta-commentary ("the honest take is", "it is worth
+  noting").
+- No em dash chains and no filler ("entirely", "crucially", "delve", "landscape"). If a sentence
+  loses nothing when a word is removed, remove it.
+
+## Evidence
+
+- Every claim about the legacy project or an external framework carries a citation (`path:line`,
+  spec URL, crate version) or an `[unverified]` marker.
+- Every number carries its conditions: build profile, sample size, machine.
+- "Fast" or "slow" without a measurement is not a statement.
+
+## Page patterns
+
+### Design document
+
+1. **Problem** — what cannot be expressed today, with a failing example.
+2. **Comparison** — how mature frameworks solve it, with sources.
+3. **Contract** — the API, its invariants, and what it deliberately does not do.
+4. **Implementation sites** — a table of file and responsibility.
+5. **Corrections** — how this subsystem got here; see below.
+6. **Verification** — tests by name, and what each would catch.
+7. **Status** — what is implemented, what is planned.
+
+### Corrections
+
+Corrections are not a page. They are a `## Corrections` section inside the design document that owns
+the contract, written as prose.
+
+- One paragraph per correction, in the order it was found: what we believed, what was observed
+  instead (the input, pixel, or measurement), what changed, and what catches it now.
+- Name the test that pins it. If nothing pins it yet, say so and add the test.
+- `###` sub-headings group corrections by contract area once the section passes a screen. Never
+  turn it into a table of rows or a bullet dump.
+- The Contract is current truth; Corrections is how we arrived. A correction that changes a
+  contract statement updates the Contract in the same edit, and the paragraph says what changed.
+- No "lesson learned" framing, no severity labels, no dates in the heading.
+
+### Reference
+
+Definition, how to use it, an options table, examples. Keep prose out of table cells.
+
+## Formatting
+
+- Wrap prose at 80 columns. Leave tables and links unwrapped when wrapping would break them.
+- One command per `sh` block, no `$` prompt, no interleaved output.
+- Prefer a table over a bullet list when every item has the same two or three fields.
+- Bold the first word of a callout (`> **Note:**`), never a whole sentence.
+
+## Terminology
+
+| Use | Instead of |
+| --- | --- |
+| frame | tick, repaint (a frame is one build-and-present cycle) |
+| declaration | view tree (a `Decl` is built per frame; the view is the app state) |
+| control | widget, component (when naming a single MD3, Fluent, or Liquid Glass control) |
+| control set | library, toolkit, design system (when naming all controls of one system) |
+| legacy project | old code, v1, crabsnap (the pre-rewrite project) |
+| nested session | test compositor, headless run (the scripted graphical session) |
+| engine | framework, core (the layout, text, and drawing crates) |
+
+## Status vocabulary
+
+Use the same words everywhere:
+
+- **Implemented** — the behavior exists and a test or screenshot proves it.
+- **Partial** — part of the contract works; say which part is missing.
+- **Planned** — designed, not built.
+- **Unverified** — claimed or designed, not checked.
+
+Do not use checkmarks or emoji as status; a word is searchable.

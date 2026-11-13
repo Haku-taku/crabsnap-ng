@@ -1,0 +1,1104 @@
+{
+ "$source": {
+  "project": "material-foundation/material-color-utilities",
+  "license": "Apache-2.0",
+  "file": "cpp/dynamiccolor/material_dynamic_colors.cc",
+  "note": "TonalSpot is the Material 3 default variant. Contrast curve order: (low, normal, medium, high). Tones extracted from the final `is_dark ? D : L` of each tone lambda; earlier returns are variant overrides (monochrome captured separately).",
+  "verifiedAgainst": "local vendored copy at /home/ollie/git/noctalia/third_party/material_color_utilities",
+  "fetchedAt": "2026-10-28",
+  "rolesNote": "Decoded from material_dynamic_colors.cc into structured tones. TonalSpot takes neither the fidelity nor the monochrome branch, so fidelity_default roles use their light/dark constants and mono_pair roles use dark==light."
+ },
+ "keyColors": {
+  "variant": "tonalSpot",
+  "primary": {
+   "hue": "source",
+   "chroma": 36.0
+  },
+  "secondary": {
+   "hue": "source",
+   "chroma": 16.0
+  },
+  "tertiary": {
+   "hue": "source + 60",
+   "chroma": 24.0
+  },
+  "neutral": {
+   "hue": "source",
+   "chroma": 6.0
+  },
+  "neutralVariant": {
+   "hue": "source",
+   "chroma": 8.0
+  },
+  "errorFixed": {
+   "hue": 25.0,
+   "chroma": 84.0
+  }
+ },
+ "toneLaw": {
+  "difference40_guarantees_contrast_ratio": 3.0,
+  "difference50_guarantees_contrast_ratio": 4.5
+ },
+ "roles": [
+  {
+   "role": "background",
+   "fn": "Background",
+   "palette": "neutral",
+   "tone": {
+    "kind": "pair",
+    "dark": 6.0,
+    "light": 98.0
+   },
+   "isBackground": true,
+   "background": null,
+   "secondBackground": null,
+   "contrastCurve": null,
+   "toneDeltaPair": null
+  },
+  {
+   "role": "on_background",
+   "fn": "OnBackground",
+   "palette": "neutral",
+   "tone": {
+    "kind": "pair",
+    "dark": 90.0,
+    "light": 10.0
+   },
+   "isBackground": false,
+   "background": "Background",
+   "secondBackground": null,
+   "contrastCurve": [
+    3.0,
+    3.0,
+    4.5,
+    7.0
+   ],
+   "toneDeltaPair": null
+  },
+  {
+   "role": "surface",
+   "fn": "Surface",
+   "palette": "neutral",
+   "tone": {
+    "kind": "pair",
+    "dark": 6.0,
+    "light": 98.0
+   },
+   "isBackground": true,
+   "background": null,
+   "secondBackground": null,
+   "contrastCurve": null,
+   "toneDeltaPair": null
+  },
+  {
+   "role": "surface_dim",
+   "fn": "SurfaceDim",
+   "palette": "neutral",
+   "tone": {
+    "kind": "light_curve",
+    "dark": 6.0,
+    "curve": [
+     87.0,
+     87.0,
+     80.0,
+     75.0
+    ]
+   },
+   "isBackground": true,
+   "background": null,
+   "secondBackground": null,
+   "contrastCurve": null,
+   "toneDeltaPair": null
+  },
+  {
+   "role": "surface_bright",
+   "fn": "SurfaceBright",
+   "palette": "neutral",
+   "tone": {
+    "kind": "dark_curve",
+    "light": 98.0,
+    "curve": [
+     24.0,
+     24.0,
+     29.0,
+     34.0
+    ]
+   },
+   "isBackground": true,
+   "background": null,
+   "secondBackground": null,
+   "contrastCurve": null,
+   "toneDeltaPair": null
+  },
+  {
+   "role": "surface_container_lowest",
+   "fn": "SurfaceContainerLowest",
+   "palette": "neutral",
+   "tone": {
+    "kind": "dark_curve",
+    "light": 100.0,
+    "curve": [
+     4.0,
+     4.0,
+     2.0,
+     0.0
+    ]
+   },
+   "isBackground": true,
+   "background": null,
+   "secondBackground": null,
+   "contrastCurve": null,
+   "toneDeltaPair": null
+  },
+  {
+   "role": "surface_container_low",
+   "fn": "SurfaceContainerLow",
+   "palette": "neutral",
+   "tone": {
+    "kind": "both_curve",
+    "dark": [
+     10.0,
+     10.0,
+     11.0,
+     12.0
+    ],
+    "light": [
+     96.0,
+     96.0,
+     96.0,
+     95.0
+    ]
+   },
+   "isBackground": true,
+   "background": null,
+   "secondBackground": null,
+   "contrastCurve": null,
+   "toneDeltaPair": null
+  },
+  {
+   "role": "surface_container",
+   "fn": "SurfaceContainer",
+   "palette": "neutral",
+   "tone": {
+    "kind": "both_curve",
+    "dark": [
+     12.0,
+     12.0,
+     16.0,
+     20.0
+    ],
+    "light": [
+     94.0,
+     94.0,
+     92.0,
+     90.0
+    ]
+   },
+   "isBackground": true,
+   "background": null,
+   "secondBackground": null,
+   "contrastCurve": null,
+   "toneDeltaPair": null
+  },
+  {
+   "role": "surface_container_high",
+   "fn": "SurfaceContainerHigh",
+   "palette": "neutral",
+   "tone": {
+    "kind": "both_curve",
+    "dark": [
+     17.0,
+     17.0,
+     21.0,
+     25.0
+    ],
+    "light": [
+     92.0,
+     92.0,
+     88.0,
+     85.0
+    ]
+   },
+   "isBackground": true,
+   "background": null,
+   "secondBackground": null,
+   "contrastCurve": null,
+   "toneDeltaPair": null
+  },
+  {
+   "role": "surface_container_highest",
+   "fn": "SurfaceContainerHighest",
+   "palette": "neutral",
+   "tone": {
+    "kind": "both_curve",
+    "dark": [
+     22.0,
+     22.0,
+     26.0,
+     30.0
+    ],
+    "light": [
+     90.0,
+     90.0,
+     84.0,
+     80.0
+    ]
+   },
+   "isBackground": true,
+   "background": null,
+   "secondBackground": null,
+   "contrastCurve": null,
+   "toneDeltaPair": null
+  },
+  {
+   "role": "on_surface",
+   "fn": "OnSurface",
+   "palette": "neutral",
+   "tone": {
+    "kind": "pair",
+    "dark": 90.0,
+    "light": 10.0
+   },
+   "isBackground": false,
+   "background": "highestSurface",
+   "secondBackground": null,
+   "contrastCurve": [
+    4.5,
+    7.0,
+    11.0,
+    21.0
+   ],
+   "toneDeltaPair": null
+  },
+  {
+   "role": "surface_variant",
+   "fn": "SurfaceVariant",
+   "palette": "neutral_variant",
+   "tone": {
+    "kind": "pair",
+    "dark": 30.0,
+    "light": 90.0
+   },
+   "isBackground": true,
+   "background": null,
+   "secondBackground": null,
+   "contrastCurve": null,
+   "toneDeltaPair": null
+  },
+  {
+   "role": "on_surface_variant",
+   "fn": "OnSurfaceVariant",
+   "palette": "neutral_variant",
+   "tone": {
+    "kind": "pair",
+    "dark": 80.0,
+    "light": 30.0
+   },
+   "isBackground": false,
+   "background": "highestSurface",
+   "secondBackground": null,
+   "contrastCurve": [
+    3.0,
+    4.5,
+    7.0,
+    11.0
+   ],
+   "toneDeltaPair": null
+  },
+  {
+   "role": "inverse_surface",
+   "fn": "InverseSurface",
+   "palette": "neutral",
+   "tone": {
+    "kind": "pair",
+    "dark": 90.0,
+    "light": 20.0
+   },
+   "isBackground": false,
+   "background": null,
+   "secondBackground": null,
+   "contrastCurve": null,
+   "toneDeltaPair": null
+  },
+  {
+   "role": "inverse_on_surface",
+   "fn": "InverseOnSurface",
+   "palette": "neutral",
+   "tone": {
+    "kind": "pair",
+    "dark": 20.0,
+    "light": 95.0
+   },
+   "isBackground": false,
+   "background": "InverseSurface",
+   "secondBackground": null,
+   "contrastCurve": [
+    4.5,
+    7.0,
+    11.0,
+    21.0
+   ],
+   "toneDeltaPair": null
+  },
+  {
+   "role": "outline",
+   "fn": "Outline",
+   "palette": "neutral_variant",
+   "tone": {
+    "kind": "pair",
+    "dark": 60.0,
+    "light": 50.0
+   },
+   "isBackground": false,
+   "background": "highestSurface",
+   "secondBackground": null,
+   "contrastCurve": [
+    1.5,
+    3.0,
+    4.5,
+    7.0
+   ],
+   "toneDeltaPair": null
+  },
+  {
+   "role": "outline_variant",
+   "fn": "OutlineVariant",
+   "palette": "neutral_variant",
+   "tone": {
+    "kind": "pair",
+    "dark": 30.0,
+    "light": 80.0
+   },
+   "isBackground": false,
+   "background": "highestSurface",
+   "secondBackground": null,
+   "contrastCurve": [
+    1.0,
+    1.0,
+    3.0,
+    4.5
+   ],
+   "toneDeltaPair": null
+  },
+  {
+   "role": "shadow",
+   "fn": "Shadow",
+   "palette": "neutral",
+   "tone": {
+    "kind": "const",
+    "value": 0.0
+   },
+   "isBackground": false,
+   "background": null,
+   "secondBackground": null,
+   "contrastCurve": null,
+   "toneDeltaPair": null
+  },
+  {
+   "role": "scrim",
+   "fn": "Scrim",
+   "palette": "neutral",
+   "tone": {
+    "kind": "const",
+    "value": 0.0
+   },
+   "isBackground": false,
+   "background": null,
+   "secondBackground": null,
+   "contrastCurve": null,
+   "toneDeltaPair": null
+  },
+  {
+   "role": "surface_tint",
+   "fn": "SurfaceTint",
+   "palette": "primary",
+   "tone": {
+    "kind": "pair",
+    "dark": 80.0,
+    "light": 40.0
+   },
+   "isBackground": true,
+   "background": null,
+   "secondBackground": null,
+   "contrastCurve": null,
+   "toneDeltaPair": null
+  },
+  {
+   "role": "primary",
+   "fn": "Primary",
+   "palette": "primary",
+   "tone": {
+    "kind": "pair",
+    "dark": 80.0,
+    "light": 40.0
+   },
+   "isBackground": true,
+   "background": "highestSurface",
+   "secondBackground": null,
+   "contrastCurve": [
+    3.0,
+    4.5,
+    7.0,
+    7.0
+   ],
+   "toneDeltaPair": {
+    "a": "primary_container",
+    "b": "primary",
+    "delta": 10.0,
+    "polarity": "nearer",
+    "stay_together": false
+   }
+  },
+  {
+   "role": "on_primary",
+   "fn": "OnPrimary",
+   "palette": "primary",
+   "tone": {
+    "kind": "pair",
+    "dark": 20.0,
+    "light": 100.0
+   },
+   "isBackground": false,
+   "background": "Primary",
+   "secondBackground": null,
+   "contrastCurve": [
+    4.5,
+    7.0,
+    11.0,
+    21.0
+   ],
+   "toneDeltaPair": null
+  },
+  {
+   "role": "primary_container",
+   "fn": "PrimaryContainer",
+   "palette": "primary",
+   "tone": {
+    "kind": "fidelity_default",
+    "dark": 30.0,
+    "light": 90.0,
+    "fidelity": "return s.source_color_hct.get_tone();"
+   },
+   "isBackground": true,
+   "background": "highestSurface",
+   "secondBackground": null,
+   "contrastCurve": [
+    1.0,
+    1.0,
+    3.0,
+    4.5
+   ],
+   "toneDeltaPair": {
+    "a": "primary_container",
+    "b": "primary",
+    "delta": 10.0,
+    "polarity": "nearer",
+    "stay_together": false
+   }
+  },
+  {
+   "role": "on_primary_container",
+   "fn": "OnPrimaryContainer",
+   "palette": "primary",
+   "tone": {
+    "kind": "fidelity_default",
+    "dark": 90.0,
+    "light": 30.0,
+    "fidelity": "return ForegroundTone(PrimaryContainer().tone_(s), 4.5);"
+   },
+   "isBackground": false,
+   "background": "PrimaryContainer",
+   "secondBackground": null,
+   "contrastCurve": [
+    3.0,
+    4.5,
+    7.0,
+    11.0
+   ],
+   "toneDeltaPair": null
+  },
+  {
+   "role": "inverse_primary",
+   "fn": "InversePrimary",
+   "palette": "primary",
+   "tone": {
+    "kind": "pair",
+    "dark": 40.0,
+    "light": 80.0
+   },
+   "isBackground": false,
+   "background": "InverseSurface",
+   "secondBackground": null,
+   "contrastCurve": [
+    3.0,
+    4.5,
+    7.0,
+    7.0
+   ],
+   "toneDeltaPair": null
+  },
+  {
+   "role": "secondary",
+   "fn": "Secondary",
+   "palette": "secondary",
+   "tone": {
+    "kind": "pair",
+    "dark": 80.0,
+    "light": 40.0
+   },
+   "isBackground": true,
+   "background": "highestSurface",
+   "secondBackground": null,
+   "contrastCurve": [
+    3.0,
+    4.5,
+    7.0,
+    7.0
+   ],
+   "toneDeltaPair": {
+    "a": "secondary_container",
+    "b": "secondary",
+    "delta": 10.0,
+    "polarity": "nearer",
+    "stay_together": false
+   }
+  },
+  {
+   "role": "on_secondary",
+   "fn": "OnSecondary",
+   "palette": "secondary",
+   "tone": {
+    "kind": "pair",
+    "dark": 20.0,
+    "light": 100.0
+   },
+   "isBackground": false,
+   "background": "Secondary",
+   "secondBackground": null,
+   "contrastCurve": [
+    4.5,
+    7.0,
+    11.0,
+    21.0
+   ],
+   "toneDeltaPair": null
+  },
+  {
+   "role": "secondary_container",
+   "fn": "SecondaryContainer",
+   "palette": "secondary",
+   "tone": {
+    "kind": "fidelity_default",
+    "dark": 30.0,
+    "light": 90.0,
+    "fidelity": "[](const DynamicScheme& s) -> double { double initialTone = s.is_dark ? 30.0 : 90.0; if (IsMonochrome(s)) { return s.is_dark ? 30.0 : 85.0; } if (!IsFidelity(s)) { return initialTone; } return FindDesiredChromaByTone(s.secondary_palette.get_hue(), s.secondary_palette.get_chroma(), initialTone, s.is_dark ? false : true); }"
+   },
+   "isBackground": true,
+   "background": "highestSurface",
+   "secondBackground": null,
+   "contrastCurve": [
+    1.0,
+    1.0,
+    3.0,
+    4.5
+   ],
+   "toneDeltaPair": {
+    "a": "secondary_container",
+    "b": "secondary",
+    "delta": 10.0,
+    "polarity": "nearer",
+    "stay_together": false
+   }
+  },
+  {
+   "role": "on_secondary_container",
+   "fn": "OnSecondaryContainer",
+   "palette": "secondary",
+   "tone": {
+    "kind": "pair",
+    "dark": 90.0,
+    "light": 30.0
+   },
+   "isBackground": false,
+   "background": "SecondaryContainer",
+   "secondBackground": null,
+   "contrastCurve": [
+    3.0,
+    4.5,
+    7.0,
+    11.0
+   ],
+   "toneDeltaPair": null
+  },
+  {
+   "role": "tertiary",
+   "fn": "Tertiary",
+   "palette": "tertiary",
+   "tone": {
+    "kind": "pair",
+    "dark": 80.0,
+    "light": 40.0
+   },
+   "isBackground": true,
+   "background": "highestSurface",
+   "secondBackground": null,
+   "contrastCurve": [
+    3.0,
+    4.5,
+    7.0,
+    7.0
+   ],
+   "toneDeltaPair": {
+    "a": "tertiary_container",
+    "b": "tertiary",
+    "delta": 10.0,
+    "polarity": "nearer",
+    "stay_together": false
+   }
+  },
+  {
+   "role": "on_tertiary",
+   "fn": "OnTertiary",
+   "palette": "tertiary",
+   "tone": {
+    "kind": "pair",
+    "dark": 20.0,
+    "light": 100.0
+   },
+   "isBackground": false,
+   "background": "Tertiary",
+   "secondBackground": null,
+   "contrastCurve": [
+    4.5,
+    7.0,
+    11.0,
+    21.0
+   ],
+   "toneDeltaPair": null
+  },
+  {
+   "role": "tertiary_container",
+   "fn": "TertiaryContainer",
+   "palette": "tertiary",
+   "tone": {
+    "kind": "pair",
+    "dark": 30.0,
+    "light": 90.0
+   },
+   "isBackground": true,
+   "background": "highestSurface",
+   "secondBackground": null,
+   "contrastCurve": [
+    1.0,
+    1.0,
+    3.0,
+    4.5
+   ],
+   "toneDeltaPair": {
+    "a": "tertiary_container",
+    "b": "tertiary",
+    "delta": 10.0,
+    "polarity": "nearer",
+    "stay_together": false
+   }
+  },
+  {
+   "role": "on_tertiary_container",
+   "fn": "OnTertiaryContainer",
+   "palette": "tertiary",
+   "tone": {
+    "kind": "pair",
+    "dark": 90.0,
+    "light": 30.0
+   },
+   "isBackground": false,
+   "background": "TertiaryContainer",
+   "secondBackground": null,
+   "contrastCurve": [
+    3.0,
+    4.5,
+    7.0,
+    11.0
+   ],
+   "toneDeltaPair": null
+  },
+  {
+   "role": "error",
+   "fn": "Error",
+   "palette": "error",
+   "tone": {
+    "kind": "pair",
+    "dark": 80.0,
+    "light": 40.0
+   },
+   "isBackground": true,
+   "background": "highestSurface",
+   "secondBackground": null,
+   "contrastCurve": [
+    3.0,
+    4.5,
+    7.0,
+    7.0
+   ],
+   "toneDeltaPair": {
+    "a": "error_container",
+    "b": "error",
+    "delta": 10.0,
+    "polarity": "nearer",
+    "stay_together": false
+   }
+  },
+  {
+   "role": "on_error",
+   "fn": "OnError",
+   "palette": "error",
+   "tone": {
+    "kind": "pair",
+    "dark": 20.0,
+    "light": 100.0
+   },
+   "isBackground": false,
+   "background": "Error",
+   "secondBackground": null,
+   "contrastCurve": [
+    4.5,
+    7.0,
+    11.0,
+    21.0
+   ],
+   "toneDeltaPair": null
+  },
+  {
+   "role": "error_container",
+   "fn": "ErrorContainer",
+   "palette": "error",
+   "tone": {
+    "kind": "pair",
+    "dark": 30.0,
+    "light": 90.0
+   },
+   "isBackground": true,
+   "background": "highestSurface",
+   "secondBackground": null,
+   "contrastCurve": [
+    1.0,
+    1.0,
+    3.0,
+    4.5
+   ],
+   "toneDeltaPair": {
+    "a": "error_container",
+    "b": "error",
+    "delta": 10.0,
+    "polarity": "nearer",
+    "stay_together": false
+   }
+  },
+  {
+   "role": "on_error_container",
+   "fn": "OnErrorContainer",
+   "palette": "error",
+   "tone": {
+    "kind": "pair",
+    "dark": 90.0,
+    "light": 30.0
+   },
+   "isBackground": false,
+   "background": "ErrorContainer",
+   "secondBackground": null,
+   "contrastCurve": [
+    3.0,
+    4.5,
+    7.0,
+    11.0
+   ],
+   "toneDeltaPair": null
+  },
+  {
+   "role": "primary_fixed",
+   "fn": "PrimaryFixed",
+   "palette": "primary",
+   "tone": {
+    "kind": "mono_pair",
+    "light": 90.0,
+    "dark": 90.0,
+    "alt_monochrome": 40.0
+   },
+   "isBackground": true,
+   "background": "highestSurface",
+   "secondBackground": null,
+   "contrastCurve": [
+    1.0,
+    1.0,
+    3.0,
+    4.5
+   ],
+   "toneDeltaPair": {
+    "a": "primary_fixed",
+    "b": "primary_fixed_dim",
+    "delta": 10.0,
+    "polarity": "lighter",
+    "stay_together": true
+   }
+  },
+  {
+   "role": "primary_fixed_dim",
+   "fn": "PrimaryFixedDim",
+   "palette": "primary",
+   "tone": {
+    "kind": "mono_pair",
+    "light": 80.0,
+    "dark": 80.0,
+    "alt_monochrome": 30.0
+   },
+   "isBackground": true,
+   "background": "highestSurface",
+   "secondBackground": null,
+   "contrastCurve": [
+    1.0,
+    1.0,
+    3.0,
+    4.5
+   ],
+   "toneDeltaPair": {
+    "a": "primary_fixed",
+    "b": "primary_fixed_dim",
+    "delta": 10.0,
+    "polarity": "lighter",
+    "stay_together": true
+   }
+  },
+  {
+   "role": "on_primary_fixed",
+   "fn": "OnPrimaryFixed",
+   "palette": "primary",
+   "tone": {
+    "kind": "mono_pair",
+    "light": 10.0,
+    "dark": 10.0,
+    "alt_monochrome": 100.0
+   },
+   "isBackground": false,
+   "background": "PrimaryFixedDim",
+   "secondBackground": "PrimaryFixed",
+   "contrastCurve": [
+    4.5,
+    7.0,
+    11.0,
+    21.0
+   ],
+   "toneDeltaPair": null
+  },
+  {
+   "role": "on_primary_fixed_variant",
+   "fn": "OnPrimaryFixedVariant",
+   "palette": "primary",
+   "tone": {
+    "kind": "mono_pair",
+    "light": 30.0,
+    "dark": 30.0,
+    "alt_monochrome": 90.0
+   },
+   "isBackground": false,
+   "background": "PrimaryFixedDim",
+   "secondBackground": "PrimaryFixed",
+   "contrastCurve": [
+    3.0,
+    4.5,
+    7.0,
+    11.0
+   ],
+   "toneDeltaPair": null
+  },
+  {
+   "role": "secondary_fixed",
+   "fn": "SecondaryFixed",
+   "palette": "secondary",
+   "tone": {
+    "kind": "mono_pair",
+    "light": 90.0,
+    "dark": 90.0,
+    "alt_monochrome": 80.0
+   },
+   "isBackground": true,
+   "background": "highestSurface",
+   "secondBackground": null,
+   "contrastCurve": [
+    1.0,
+    1.0,
+    3.0,
+    4.5
+   ],
+   "toneDeltaPair": {
+    "a": "secondary_fixed",
+    "b": "secondary_fixed_dim",
+    "delta": 10.0,
+    "polarity": "lighter",
+    "stay_together": true
+   }
+  },
+  {
+   "role": "secondary_fixed_dim",
+   "fn": "SecondaryFixedDim",
+   "palette": "secondary",
+   "tone": {
+    "kind": "mono_pair",
+    "light": 80.0,
+    "dark": 80.0,
+    "alt_monochrome": 70.0
+   },
+   "isBackground": true,
+   "background": "highestSurface",
+   "secondBackground": null,
+   "contrastCurve": [
+    1.0,
+    1.0,
+    3.0,
+    4.5
+   ],
+   "toneDeltaPair": {
+    "a": "secondary_fixed",
+    "b": "secondary_fixed_dim",
+    "delta": 10.0,
+    "polarity": "lighter",
+    "stay_together": true
+   }
+  },
+  {
+   "role": "on_secondary_fixed",
+   "fn": "OnSecondaryFixed",
+   "palette": "secondary",
+   "tone": {
+    "kind": "const",
+    "value": 10.0
+   },
+   "isBackground": false,
+   "background": "SecondaryFixedDim",
+   "secondBackground": "SecondaryFixed",
+   "contrastCurve": [
+    4.5,
+    7.0,
+    11.0,
+    21.0
+   ],
+   "toneDeltaPair": null
+  },
+  {
+   "role": "on_secondary_fixed_variant",
+   "fn": "OnSecondaryFixedVariant",
+   "palette": "secondary",
+   "tone": {
+    "kind": "mono_pair",
+    "light": 30.0,
+    "dark": 30.0,
+    "alt_monochrome": 25.0
+   },
+   "isBackground": false,
+   "background": "SecondaryFixedDim",
+   "secondBackground": "SecondaryFixed",
+   "contrastCurve": [
+    3.0,
+    4.5,
+    7.0,
+    11.0
+   ],
+   "toneDeltaPair": null
+  },
+  {
+   "role": "tertiary_fixed",
+   "fn": "TertiaryFixed",
+   "palette": "tertiary",
+   "tone": {
+    "kind": "mono_pair",
+    "light": 90.0,
+    "dark": 90.0,
+    "alt_monochrome": 40.0
+   },
+   "isBackground": true,
+   "background": "highestSurface",
+   "secondBackground": null,
+   "contrastCurve": [
+    1.0,
+    1.0,
+    3.0,
+    4.5
+   ],
+   "toneDeltaPair": {
+    "a": "tertiary_fixed",
+    "b": "tertiary_fixed_dim",
+    "delta": 10.0,
+    "polarity": "lighter",
+    "stay_together": true
+   }
+  },
+  {
+   "role": "tertiary_fixed_dim",
+   "fn": "TertiaryFixedDim",
+   "palette": "tertiary",
+   "tone": {
+    "kind": "mono_pair",
+    "light": 80.0,
+    "dark": 80.0,
+    "alt_monochrome": 30.0
+   },
+   "isBackground": true,
+   "background": "highestSurface",
+   "secondBackground": null,
+   "contrastCurve": [
+    1.0,
+    1.0,
+    3.0,
+    4.5
+   ],
+   "toneDeltaPair": {
+    "a": "tertiary_fixed",
+    "b": "tertiary_fixed_dim",
+    "delta": 10.0,
+    "polarity": "lighter",
+    "stay_together": true
+   }
+  },
+  {
+   "role": "on_tertiary_fixed",
+   "fn": "OnTertiaryFixed",
+   "palette": "tertiary",
+   "tone": {
+    "kind": "mono_pair",
+    "light": 10.0,
+    "dark": 10.0,
+    "alt_monochrome": 100.0
+   },
+   "isBackground": false,
+   "background": "TertiaryFixedDim",
+   "secondBackground": "TertiaryFixed",
+   "contrastCurve": [
+    4.5,
+    7.0,
+    11.0,
+    21.0
+   ],
+   "toneDeltaPair": null
+  },
+  {
+   "role": "on_tertiary_fixed_variant",
+   "fn": "OnTertiaryFixedVariant",
+   "palette": "tertiary",
+   "tone": {
+    "kind": "mono_pair",
+    "light": 30.0,
+    "dark": 30.0,
+    "alt_monochrome": 90.0
+   },
+   "isBackground": false,
+   "background": "TertiaryFixedDim",
+   "secondBackground": "TertiaryFixed",
+   "contrastCurve": [
+    3.0,
+    4.5,
+    7.0,
+    11.0
+   ],
+   "toneDeltaPair": null
+  }
+ ]
+}

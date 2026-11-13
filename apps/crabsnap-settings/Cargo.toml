@@ -1,0 +1,26 @@
+[package]
+name = "crabsnap-settings"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Settings window for crabsnap: the one editor of the configuration file."
+
+[lib]
+path = "src/settings.rs"
+
+[[bin]]
+name = "crabsnap-settings"
+path = "src/main.rs"
+
+[dependencies]
+crabsnap-core = { path = "../crabsnap-core" }
+crabsnap-platform = { path = "../crabsnap-platform" }
+ui-core = { path = "../../ui/crates/ui-core" }
+ui-i18n = { path = "../../ui/crates/ui-i18n" }
+ui-platform = { path = "../../ui/crates/ui-platform" }
+ui-platform-wayland = { path = "../../ui/crates/ui-platform-wayland", features = ["gpu", "system-fonts"] }
+ui-design = { path = "../../ui/crates/ui-design" }
+ui-style = { path = "../../ui/crates/ui-style" }
+ui-widgets = { path = "../../ui/crates/ui-widgets" }
+ui-widgets-md3 = { path = "../../ui/crates/ui-widgets-md3" }

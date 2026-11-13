@@ -1,0 +1,508 @@
+{
+  "$source": {
+    "project": "hig_mcp (HIG data server), v0.3.0",
+    "valuesFrom": "Apple HIG: Color spec table, Typography specifications, Materials, Layout; SwiftUI docs for OS 26/27",
+    "checkedBySource": "2026-10-17",
+    "fetchedAt": "2026-10-28",
+    "provenanceTags": {
+      "apple-system": "Apple system value",
+      "apple-hig": "stated in the HIG",
+      "apple-sfsymbols": "SF Symbols",
+      "convention": "community/common convention, NOT an Apple number",
+      "community-bestpractice": "independent audit/community number, verify",
+      "figma-effect": "Figma Glass effect parameter range",
+      "wcag-aa": "WCAG AA requirement"
+    },
+    "note": "Apple publishes no colour/spacing token files: values are ADAPTIVE and resolved by the OS per appearance and contrast. Hex and point sizes here are reference-only; never hardcode them in shipping UI."
+  },
+  "color": {
+    "systemColors": {
+      "systemRed": {
+        "light": "#FF383C",
+        "dark": "#FF4245",
+        "light_increased_contrast": "#E9152D",
+        "dark_increased_contrast": "#FF6165"
+      },
+      "systemOrange": {
+        "light": "#FF8D28",
+        "dark": "#FF9230",
+        "light_increased_contrast": "#C55300",
+        "dark_increased_contrast": "#FFA056"
+      },
+      "systemYellow": {
+        "light": "#FFCC00",
+        "dark": "#FFD600",
+        "light_increased_contrast": "#A16A00",
+        "dark_increased_contrast": "#FEDF43"
+      },
+      "systemGreen": {
+        "light": "#34C759",
+        "dark": "#30D158",
+        "light_increased_contrast": "#008932",
+        "dark_increased_contrast": "#4AD968"
+      },
+      "systemMint": {
+        "light": "#00C8B3",
+        "dark": "#00DAC3",
+        "light_increased_contrast": "#008575",
+        "dark_increased_contrast": "#54DFCB"
+      },
+      "systemTeal": {
+        "light": "#00C3D0",
+        "dark": "#00D2E0",
+        "light_increased_contrast": "#008198",
+        "dark_increased_contrast": "#3BDDEC"
+      },
+      "systemCyan": {
+        "light": "#00C0E8",
+        "dark": "#3CD3FE",
+        "light_increased_contrast": "#007EAE",
+        "dark_increased_contrast": "#6DD9FF"
+      },
+      "systemBlue": {
+        "light": "#0088FF",
+        "dark": "#0091FF",
+        "light_increased_contrast": "#1E6EF4",
+        "dark_increased_contrast": "#5CB8FF"
+      },
+      "systemIndigo": {
+        "light": "#6155F5",
+        "dark": "#6D7CFF",
+        "light_increased_contrast": "#564ADE",
+        "dark_increased_contrast": "#A7AAFF"
+      },
+      "systemPurple": {
+        "light": "#CB30E0",
+        "dark": "#DB34F2",
+        "light_increased_contrast": "#B02FC2",
+        "dark_increased_contrast": "#EA8DFF"
+      },
+      "systemPink": {
+        "light": "#FF2D55",
+        "dark": "#FF375F",
+        "light_increased_contrast": "#E7124D",
+        "dark_increased_contrast": "#FF8AC4"
+      },
+      "systemBrown": {
+        "light": "#AC7F5E",
+        "dark": "#B78A66",
+        "light_increased_contrast": "#956D51",
+        "dark_increased_contrast": "#DBA679"
+      },
+      "systemGray": {
+        "light": "#8E8E93",
+        "dark": "#8E8E93",
+        "light_increased_contrast": "#6C6C70",
+        "dark_increased_contrast": "#AEAEB2"
+      }
+    },
+    "grayRamp": {
+      "systemGray2": {
+        "light": "#AEAEB2",
+        "dark": "#636366",
+        "light_increased_contrast": "#8E8E93",
+        "dark_increased_contrast": "#7C7C80"
+      },
+      "systemGray3": {
+        "light": "#C7C7CC",
+        "dark": "#48484A",
+        "light_increased_contrast": "#AEAEB2",
+        "dark_increased_contrast": "#545456"
+      },
+      "systemGray4": {
+        "light": "#D1D1D6",
+        "dark": "#3A3A3C",
+        "light_increased_contrast": "#BCBCC0",
+        "dark_increased_contrast": "#444446"
+      },
+      "systemGray5": {
+        "light": "#E5E5EA",
+        "dark": "#2C2C2E",
+        "light_increased_contrast": "#D8D8DC",
+        "dark_increased_contrast": "#363638"
+      },
+      "systemGray6": {
+        "light": "#F2F2F7",
+        "dark": "#1C1C1E",
+        "light_increased_contrast": "#EBEBF0",
+        "dark_increased_contrast": "#242426"
+      }
+    },
+    "semanticRoles": [
+      "label",
+      "secondaryLabel",
+      "tertiaryLabel",
+      "quaternaryLabel",
+      "systemBackground",
+      "secondarySystemBackground",
+      "tertiarySystemBackground",
+      "systemGroupedBackground",
+      "separator",
+      "opaqueSeparator",
+      "systemFill",
+      "secondarySystemFill",
+      "tertiarySystemFill",
+      "quaternarySystemFill",
+      "tintColor"
+    ],
+    "src": "apple-system",
+    "systemFills": {
+      "systemFill": {
+        "light": "#33787880",
+        "dark": "#5B787880",
+        "light_increased_contrast": "#47787880",
+        "dark_increased_contrast": "#70787880"
+      },
+      "secondarySystemFill": {
+        "light": "#28787880",
+        "dark": "#51787880",
+        "light_increased_contrast": "#3D787880",
+        "dark_increased_contrast": "#66787880"
+      },
+      "tertiarySystemFill": {
+        "light": "#1E767680",
+        "dark": "#3D767680",
+        "light_increased_contrast": "#33767680",
+        "dark_increased_contrast": "#51767680"
+      },
+      "quaternarySystemFill": {
+        "light": "#14747480",
+        "dark": "#2D767680",
+        "light_increased_contrast": "#28747480",
+        "dark_increased_contrast": "#42767680"
+      }
+    },
+    "disabledColors": {
+      "inactiveGray": {
+        "light": "#FF999999",
+        "dark": "#FF757575",
+        "light_increased_contrast": "#FF999999",
+        "dark_increased_contrast": "#FF757575"
+      }
+    }
+  },
+  "typography": {
+    "font": "SF Pro (Display ≥20pt, Text <20pt); SF Mono for code; New York for serif",
+    "opticalSizeRule": "Use SF Pro Display at ≥20pt and SF Pro Text below 20pt.",
+    "iosTextStyles": {
+      "largeTitle": {
+        "size": 34,
+        "weight": "regular",
+        "lineHeight": 41,
+        "emphasized": "bold"
+      },
+      "title1": {
+        "size": 28,
+        "weight": "regular",
+        "lineHeight": 34,
+        "emphasized": "bold"
+      },
+      "title2": {
+        "size": 22,
+        "weight": "regular",
+        "lineHeight": 28,
+        "emphasized": "bold"
+      },
+      "title3": {
+        "size": 20,
+        "weight": "regular",
+        "lineHeight": 25,
+        "emphasized": "semibold"
+      },
+      "headline": {
+        "size": 17,
+        "weight": "semibold",
+        "lineHeight": 22,
+        "emphasized": "semibold"
+      },
+      "body": {
+        "size": 17,
+        "weight": "regular",
+        "lineHeight": 22,
+        "emphasized": "semibold"
+      },
+      "callout": {
+        "size": 16,
+        "weight": "regular",
+        "lineHeight": 21,
+        "emphasized": "semibold"
+      },
+      "subheadline": {
+        "size": 15,
+        "weight": "regular",
+        "lineHeight": 20,
+        "emphasized": "semibold"
+      },
+      "footnote": {
+        "size": 13,
+        "weight": "regular",
+        "lineHeight": 18,
+        "emphasized": "semibold"
+      },
+      "caption1": {
+        "size": 12,
+        "weight": "regular",
+        "lineHeight": 16,
+        "emphasized": "semibold"
+      },
+      "caption2": {
+        "size": 11,
+        "weight": "regular",
+        "lineHeight": 13,
+        "emphasized": "semibold"
+      }
+    },
+    "macosTextStyles": {
+      "largeTitle": {
+        "size": 26,
+        "weight": "regular",
+        "lineHeight": 32,
+        "emphasized": "bold"
+      },
+      "title1": {
+        "size": 22,
+        "weight": "regular",
+        "lineHeight": 26,
+        "emphasized": "bold"
+      },
+      "title2": {
+        "size": 17,
+        "weight": "regular",
+        "lineHeight": 22,
+        "emphasized": "bold"
+      },
+      "title3": {
+        "size": 15,
+        "weight": "regular",
+        "lineHeight": 20,
+        "emphasized": "semibold"
+      },
+      "headline": {
+        "size": 13,
+        "weight": "bold",
+        "lineHeight": 16,
+        "emphasized": "heavy"
+      },
+      "body": {
+        "size": 13,
+        "weight": "regular",
+        "lineHeight": 16,
+        "emphasized": "semibold"
+      },
+      "callout": {
+        "size": 12,
+        "weight": "regular",
+        "lineHeight": 15,
+        "emphasized": "semibold"
+      },
+      "subheadline": {
+        "size": 11,
+        "weight": "regular",
+        "lineHeight": 14,
+        "emphasized": "semibold"
+      },
+      "footnote": {
+        "size": 10,
+        "weight": "regular",
+        "lineHeight": 13,
+        "emphasized": "semibold"
+      },
+      "caption1": {
+        "size": 10,
+        "weight": "regular",
+        "lineHeight": 13,
+        "emphasized": "medium"
+      },
+      "caption2": {
+        "size": 10,
+        "weight": "medium",
+        "lineHeight": 13,
+        "emphasized": "semibold"
+      }
+    },
+    "src": "apple-hig",
+    "note": "iOS sizes are Dynamic Type at the default (Large) setting and must scale; macOS sizes are fixed and smaller."
+  },
+  "layout": {
+    "hitTarget": {
+      "ios_ipados": {
+        "default": "44x44",
+        "minimum": "28x28"
+      },
+      "macos": {
+        "default": "28x28",
+        "minimum": "20x20"
+      },
+      "tvos": {
+        "default": "66x66",
+        "minimum": "56x56"
+      },
+      "visionos": {
+        "default": "60x60",
+        "minimum": "28x28"
+      },
+      "watchos": {
+        "default": "44x44",
+        "minimum": "28x28"
+      },
+      "spacingBetweenControls": {
+        "bezeled": 12,
+        "noBezel": 24
+      },
+      "src": "apple-hig"
+    },
+    "spacing": {
+      "grid": 8,
+      "scale": [
+        4,
+        8,
+        12,
+        16,
+        20,
+        24,
+        32,
+        40,
+        48
+      ],
+      "layoutMargins": {
+        "compact": 16,
+        "regular": 20
+      },
+      "src": "convention",
+      "note": "Apple publishes no numeric spacing scale; prefer system spacing / safe-area insets."
+    },
+    "radii": {
+      "curvature": "continuous (squircle), not circular",
+      "concentricity": "outer = inner + padding",
+      "commonControl": {
+        "small": 8,
+        "medium": 12,
+        "card": 16,
+        "sheet": "system"
+      },
+      "src": "guidance",
+      "note": "Apple publishes no radius scale; many system controls use capsule or system-managed radii."
+    }
+  },
+  "materials": {
+    "systemMaterials": [
+      ".ultraThinMaterial",
+      ".thinMaterial",
+      ".regularMaterial",
+      ".thickMaterial",
+      ".ultraThickMaterial",
+      ".bar"
+    ],
+    "purpose": "Content layer. Pick by meaning, not by perceived colour; thicker = more opaque = better contrast for text.",
+    "liquidGlass": {
+      "variants": {
+        "regular": "default, blurs + adjusts luminosity",
+        "clear": "highly translucent, over media only",
+        "identity": "no effect"
+      },
+      "clearDimming": {
+        "opacity": 0.35,
+        "when": "behind clear glass over bright content",
+        "src": "apple-hig"
+      },
+      "fallback": "Reduce Transparency / Increase Contrast: ship a solid variant; system glass adapts itself",
+      "appleNumericBudgets": "none published",
+      "communityGuardrails": {
+        "blurRadiusMaxPx": {
+          "iphone": 40,
+          "ipad_mac": 60,
+          "src": "community-bestpractice",
+          "verify": true
+        },
+        "maxCompositingLayers": {
+          "value": 4,
+          "scope": "per screen",
+          "src": "community-bestpractice",
+          "verify": true
+        },
+        "figmaDepthMax": {
+          "value": 20,
+          "src": "figma-effect"
+        },
+        "figmaFrostRange": {
+          "min": 10,
+          "max": 25,
+          "src": "figma-effect"
+        },
+        "minTextContrastAfterBlur": {
+          "ratio": "4.5:1",
+          "src": "wcag-aa"
+        }
+      }
+    },
+    "materialRecipes": {
+      "$note": "Apple publishes no values for its content materials (see liquidGlass.appleNumericBudgets). These are our derivation: sigma and tint alpha both grow with thickness, following the ordering in purpose above. Tints are a neutral wash over the blurred backdrop; alpha is per context column [light, dark, light-increased-contrast, dark-increased-contrast].",
+      "tint": {
+        "light": "#FFFFFF",
+        "dark": "#1C1C1E"
+      },
+      "fallback": {
+        "light": "#FFFFFF",
+        "dark": "#000000",
+        "light_increased_contrast": "#FFFFFF",
+        "dark_increased_contrast": "#000000"
+      },
+      "materials": {
+        "ultraThinMaterial": {
+          "sigma": 10,
+          "alpha": [
+            0.16,
+            0.16,
+            0.31,
+            0.31
+          ]
+        },
+        "thinMaterial": {
+          "sigma": 14,
+          "alpha": [
+            0.32,
+            0.32,
+            0.47,
+            0.47
+          ]
+        },
+        "regularMaterial": {
+          "sigma": 18,
+          "alpha": [
+            0.5,
+            0.5,
+            0.65,
+            0.65
+          ]
+        },
+        "thickMaterial": {
+          "sigma": 22,
+          "alpha": [
+            0.66,
+            0.66,
+            0.81,
+            0.81
+          ]
+        },
+        "ultraThickMaterial": {
+          "sigma": 26,
+          "alpha": [
+            0.82,
+            0.82,
+            0.97,
+            0.97
+          ]
+        },
+        "bar": {
+          "sigma": 18,
+          "alpha": [
+            0.62,
+            0.62,
+            0.77,
+            0.77
+          ]
+        }
+      }
+    }
+  }
+}

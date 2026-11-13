@@ -1,0 +1,2018 @@
+//! A Markdown document placed block by block, read or edited in place.
+//!
+//! One control renders the document: the same tree, geometry and look whether or not
+//! editing is on. Editing adds the caret, the input views and the syntax reveal; reading
+//! draws the decoded text and the objects a mark stands for. The app owns the document
+//! string and re-parses it after every edit.
+
+use std::ops::Range;
+
+use ui_core::geom::{Color, Corners, Insets, Point};
+use ui_core::layout::{
+    Anchor, AutoFlow, AxisSize, Grow, OverlayPlacement, SizeClass, Track, TrackList,
+};
+use ui_core::text::{Decoration, Family, GenericFamily, TextAlign};
+use ui_core::tree::ImageFit;
+use ui_core::shortcut::{KeyChord, ShortcutId};
+use ui_core::{
+    AtomBox, CursorShape, Decl, Id, Key, Modifiers, NodeData, NodeKind, Sense, TextBlock, TextRun,
+    TextStyle, Weight,
+};
+use ui_i18n::Msg;
+use ui_richtext::{Alignment as TableAlignment, Block, BlockKind, Document, MarkKind};
+
+/// Width of the bar a quote sets its content behind.
+const QUOTE_BAR: f32 = 3.0;
+
+/// A fenced block's card: its corner, its side inset, and the size of its head and foot.
+const CODE_CARD_RADIUS: f32 = 8.0;
+const CODE_CARD_PAD: f32 = 12.0;
+const CODE_CARD_NOTE: f32 = 12.0;
+
+/// A table cell's side and vertical padding, and the rule under the header row.
+const TABLE_CELL_PAD: f32 = 6.0;
+/// Side of a task item's checkbox; the item's text starts after it.
+const TASK_BOX: f32 = 16.0;
+const TABLE_CELL_PAD_Y: f32 = 3.0;
+const TABLE_SEPARATOR: f32 = 1.0;
+
+/// A page-supplied highlighter for a fenced block: its language, its source and the base
+/// style, answered with runs whose text concatenates to that source. The page owns the
+/// grammar and the colours; the control owns where the runs fall.
+pub type CodeStyle = fn(Option<&str>, &str, TextStyle) -> Option<Vec<TextRun>>;
+
+/// One registered texture, with the pixel size its aspect ratio comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ImageTexture {
+    pub id: u64,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// A page-supplied texture for an image's source string. The string is the destination
+/// exactly as written between the parentheses; resolving a path or fetching is the page's.
+pub type ImageSource = fn(&str) -> Option<ImageTexture>;
+
+/// How an inline formula is edited.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MathEditing {
+    /// The rendered formula gives way to its source and a preview floats beside it.
+    Source,
+    /// The rendered formula stays; a press on either half puts the caret at that edge of
+    /// its source, which then reveals like any other construct.
+    #[default]
+    InPlace,
+}
+
+/// The room between the formula's view and the preview, and the panel's own frame.
+const MATH_PREVIEW_OFFSET: f32 = 6.0;
+const MATH_PREVIEW_PAD: f32 = 8.0;
+const MATH_PREVIEW_RADIUS: f32 = 4.0;
+
+/// A line break that continues the list or quote the caret is in, and ends it when the
+/// caret's line holds no content.
+pub const BREAK: ShortcutId = ShortcutId("markdown.break");
+/// An indent of the caret's line by the step that nests it; `OUTDENT` takes it back.
+pub const INDENT: ShortcutId = ShortcutId("markdown.indent");
+pub const OUTDENT: ShortcutId = ShortcutId("markdown.outdent");
+
+/// A Markdown document.
+///
+/// The look of a block kind lives here, not in the caller: a document control that took a
+/// per-kind callback would make every caller re-state the same heading scale, and a second
+/// control for the same document would state it again.
+pub struct Markdown<'a> {
+    /// The column's own id. A block's id is this mixed with its path of child indices.
+    pub id: Id,
+    pub document: &'a Document,
+    /// The projections cut beside the parse, when the app prepared them. A page that keeps
+    /// a long document hands them over so a frame positions runs instead of cutting them
+    /// again; `None` cuts them here, which is what a short document wants.
+    pub prepared: Option<&'a ui_richtext::Prepared>,
+    /// Whether the document can be edited in place. Off, it still renders the same blocks
+    /// with the same geometry: no syntax is shown, and no caret, selection or view exists.
+    pub editable: bool,
+    /// How an inline formula is edited while `editable` is on.
+    pub math_editing: MathEditing,
+    /// The opaque surface a formula preview sits on. It must not be translucent: the
+    /// document behind it would show through the typeset formula.
+    pub popover_fill: Color,
+    /// The column's width; each block wraps inside it.
+    pub width: f32,
+    /// Body size. Heading levels and code scale from it.
+    pub size: f32,
+    pub ink: Color,
+    /// Ink for syntax that is showing because the caret is inside it.
+    pub marker_ink: Color,
+    /// Ink of a link and of an inline formula.
+    pub link_ink: Color,
+    pub code_ink: Color,
+    pub code_fill: Color,
+    /// A page-supplied highlighter for a fenced block, if the page has one.
+    pub code_style: Option<CodeStyle>,
+    /// A page-supplied texture for a block that is one image, if the page has one.
+    pub image: Option<ImageSource>,
+    /// Ink of the bullet, the number and the quote bar.
+    pub muted: Color,
+    pub caret_ink: Color,
+    pub selection_fill: Color,
+    pub selection_painter: Option<ui_core::SelectionPainterRef>,
+}
+
+/// The id of the block at `path`, the chain of child indices from the document root.
+fn block_id(root: Id, path: &[usize]) -> Id {
+    path.iter().fold(root, |id, index| id.with(*index))
+}
+
+impl<'a> Markdown<'a> {
+    /// Builder: how an inline formula is edited.
+    pub fn math_editing(mut self, mode: MathEditing) -> Self {
+        self.math_editing = mode;
+        self
+    }
+
+    pub fn resolve_in(&self, cx: &crate::Cx<'_, '_>) -> Decl {
+        // One input over the whole source: a block draws a window onto it, so a selection,
+        // a caret and an edit all live in one coordinate space. Chrome stays outside.
+        let source = self.document.source.as_str();
+        let mut column = Decl::container(self.id, NodeKind::Column)
+            .size(SizeClass {
+                width: AxisSize::fixed(self.width),
+                height: AxisSize::hug(0.0, 0.0),
+                grow_x: Grow::No,
+                grow_y: Grow::No,
+            })
+            // The document's vertical rhythm is its own lines: a blank source line draws a
+            // row, and nothing adds space between blocks that the source does not spell.
+            .gap(0.0);
+        if self.editable {
+            column = column
+                .sense(Sense::FOCUSABLE)
+                .cursor(CursorShape::Text)
+                .text_input(source)
+                .text_input_enter_newline()
+                .shortcut(KeyChord::new(Key::Enter, Modifiers::default()), BREAK)
+                .shortcut(KeyChord::new(Key::Tab, Modifiers::default()), INDENT)
+                .shortcut(
+                    KeyChord::new(Key::Tab, Modifiers { shift: true, ..Modifiers::default() }),
+                    OUTDENT,
+                );
+            self.command(cx);
+        }
+        let mut path = Vec::new();
+        let mut previous_end = None;
+        for (index, block) in self.document.blocks.iter().enumerate() {
+            if let Some(end) = previous_end {
+                for row in self.blank_rows(end, block.full.start, self.id, self.width, cx) {
+                    column = column.child(row);
+                }
+            }
+            path.push(index);
+            for decl in self.place(block, &mut path, self.width, cx) {
+                column = column.child(decl);
+            }
+            path.pop();
+            previous_end = Some(block.full.end);
+        }
+        // A source that ends in a line break leaves an empty last line. No block draws it,
+        // so the caret after the final break would sit nowhere; this view draws that line.
+        if self.editable && (source.is_empty() || source.ends_with('\n')) {
+            let base = source.len();
+            let caret = cx
+                .core()
+                .caret_for(self.id)
+                .filter(|at| *at == base)
+                .map(|_| 0);
+            let tail = self.tail_view(self.id.with("tail"), base, self.width, caret);
+            column = column.child(tail);
+        }
+        if let Some(preview) = self.math_preview(cx) {
+            column = column.child(preview);
+        }
+        column
+    }
+
+    /// The live formula preview Source mode floats while the caret touches a formula.
+    ///
+    /// It reads the committed document, never the preedit, so an IME composition does not
+    /// rewrite it. Being an overlay, it takes no flow space and opening it moves nothing.
+    fn math_preview(&self, cx: &crate::Cx<'_, '_>) -> Option<Decl> {
+        if !self.editable || self.math_editing != MathEditing::Source {
+            return None;
+        }
+        if cx.core().focused() != Some(self.id) {
+            return None;
+        }
+        let selection = self.selection_range(cx)?;
+        let mark = self.document.marks.iter().find(|mark| {
+            mark.kind == MarkKind::InlineMath
+                && selection.start <= mark.full.end
+                && mark.full.start <= selection.end
+        })?;
+        // An atom has no node and its rect exists only after layout; the caret's x in the
+        // leaf view is the nearest fact that names the formula's place on the line.
+        let view = self.text_view_for(&mark.full)?;
+        let anchor = match (cx.core().caret_in_text_for(view), cx.rect_of(view)) {
+            (Some(x), Some(rect)) => Anchor::Point(Point::new(
+                rect.origin.x + x,
+                rect.origin.y + rect.size.h,
+            )),
+            _ => Anchor::Node(view),
+        };
+        let content = self.document.source.get(mark.range.clone())?;
+        let id = self.id.with(("math-preview", mark.full.start));
+        let formula = crate::math::Math::new(
+            id.with("formula"),
+            content.trim(),
+            self.size,
+            self.link_ink,
+        )
+        .resolve_in(cx);
+        Some(
+            Decl::container(id, NodeKind::Column)
+                .overlay(OverlayPlacement::below(anchor).offset(MATH_PREVIEW_OFFSET))
+                .padding(Insets::all(MATH_PREVIEW_PAD))
+                .background(self.popover_fill, Corners::all(MATH_PREVIEW_RADIUS))
+                .border(self.muted, 1.0)
+                .child(formula),
+        )
+    }
+
+    /// The id of the leaf text view drawing `range`, so an overlay can hang from it.
+    fn text_view_for(&self, range: &Range<usize>) -> Option<Id> {
+        fn walk(blocks: &[Block], path: &mut Vec<usize>, range: &Range<usize>) -> Option<Vec<usize>> {
+            for (index, block) in blocks.iter().enumerate() {
+                if range.start < block.full.start || block.full.end < range.end {
+                    continue;
+                }
+                path.push(index);
+                if block.children().is_empty() {
+                    return Some(path.clone());
+                }
+                if let Some(found) = walk(block.children(), path, range) {
+                    return Some(found);
+                }
+                path.pop();
+            }
+            None
+        }
+        let path = walk(&self.document.blocks, &mut Vec::new(), range)?;
+        Some(block_id(self.id, &path).with("text"))
+    }
+
+    /// Answer this frame's own shortcut, when one fired on this control.
+    ///
+    /// The engine applies the edit it asks for as one engine edit at the caret it names, so
+    /// the source, the history and the app's copy all take the same bytes.
+    fn command(&self, cx: &crate::Cx<'_, '_>) {
+        let Some((id, shortcut)) = cx.core().shortcut() else {
+            return;
+        };
+        if id != self.id {
+            return;
+        }
+        // The selection as the key saw it: keys later in the same burst may have extended it,
+        // and replacing that would delete text the user selected after pressing this one.
+        let (start, end, backwards) = match cx.core().shortcut_selection(self.id) {
+            Some(selection) => (
+                selection.anchor.min(selection.caret),
+                selection.anchor.max(selection.caret),
+                selection.anchor > selection.caret,
+            ),
+            None => match cx.core().caret_for(self.id) {
+                Some(at) => (at, at, false),
+                None => return,
+            },
+        };
+        // The engine's buffer, not this frame's tree: a character typed into the same burst
+        // as this key has not been parsed yet, and the edit must land after it.
+        let source = cx
+            .core()
+            .input_value(self.id)
+            .unwrap_or(self.document.source.as_str());
+        let edit = match shortcut {
+            BREAK => ui_richtext::line_break(source, start..end),
+            INDENT => match ui_richtext::indent(source, start..end, false) {
+                Some(edit) => edit,
+                None => return,
+            },
+            OUTDENT => match ui_richtext::indent(source, start..end, true) {
+                Some(edit) => edit,
+                None => return,
+            },
+            _ => return,
+        };
+        match edit.selection {
+            Some((anchor, caret)) => {
+                // The command sees a normalised range; keep the direction the user's
+                // selection had, so Shift+Tab leaves the active end where Shift+Tab found it.
+                let (anchor, caret) = if backwards { (caret, anchor) } else { (anchor, caret) };
+                cx.core().edit_input_selecting(self.id, edit.range, edit.text, (anchor, caret));
+            }
+            None => cx.core().edit_input(self.id, edit.range, edit.text, edit.caret),
+        }
+    }
+
+    /// One block as its declarations, at `width` logical units.
+    fn place(
+        &self,
+        block: &Block,
+        path: &mut Vec<usize>,
+        width: f32,
+        cx: &crate::Cx<'_, '_>,
+    ) -> Vec<Decl> {
+        let id = block_id(self.id, path);
+        match &block.kind {
+            BlockKind::Paragraph => vec![self.view(
+                block,
+                id,
+                width,
+                TextStyle::new(self.size),
+                cx,
+            )],
+            BlockKind::Heading(level) => {
+                let size = match level {
+                    1 => self.size * 1.7,
+                    2 => self.size * 1.35,
+                    _ => self.size * 1.15,
+                };
+                vec![self.view(
+                    block,
+                    id,
+                    width,
+                    TextStyle::new(size).weight(Weight::BOLD),
+                    cx,
+                )]
+            }
+            BlockKind::CodeBlock { language } => {
+                vec![self.code_block(block, id, width, language.as_deref(), cx)]
+            }
+            BlockKind::Math => {
+                let source: String = block
+                    .pieces()
+                    .iter()
+                    .map(|piece| piece.text.as_str())
+                    .collect();
+                let mut decl =
+                    crate::math::Math::new(id, source.trim(), self.size * 1.15, self.ink)
+                        .display()
+                        .resolve_in(cx);
+                decl.size_class.width = AxisSize::fixed(width);
+                vec![decl]
+            }
+            BlockKind::Image { destination } => {
+                vec![self.image_block(block, id, width, destination, cx)]
+            }
+            BlockKind::Rule => vec![Decl::container(id, NodeKind::Row)
+                .size(SizeClass {
+                    width: AxisSize::fixed(width),
+                    height: AxisSize::fixed(1.0),
+                    grow_x: Grow::No,
+                    grow_y: Grow::No,
+                })
+                .background(self.muted, Corners::ZERO)],
+            BlockKind::Quote => {
+                let source = self.document.source.as_str();
+                // A quote writes `> ` on every line. Each child owns the prefix of its own
+                // first line; the bytes after a line break belong to no leaf frame, so
+                // without a view of its own the prefix could not be reached or deleted.
+                let mut since = block.span.start.min(block.full.start);
+                // A `>`-only line before a child is no block: the parser drops it as a blank
+                // paragraph break, so it needs a row of its own to show and to hold a caret.
+                let mut gaps: Vec<(Vec<Range<usize>>, Option<Range<usize>>)> = Vec::new();
+                for child in block.children() {
+                    let own = quote_prefix(source, since..child.full.start);
+                    let own_start = own.as_ref().map_or(child.full.start, |range| range.start);
+                    gaps.push((marker_lines(source, since..own_start), own));
+                    since = child.full.end;
+                }
+                let tail = quote_tail(source, since..block.full.end);
+                let tail_start =
+                    tail.as_ref().map_or(block.full.end, |(range, _)| range.start);
+                let tail_markers = marker_lines(source, since..tail_start);
+                // The bar is decoration in its own column and costs that column only. A
+                // prefix takes its own width while the caret is on its line and none while
+                // it is away, so the line's text moves when the caret arrives.
+                let inner = (width - QUOTE_BAR).max(0.0);
+                let mut content = Decl::container(id.with("content"), NodeKind::Column)
+                    .size(SizeClass::hug(0.0, 0.0))
+                    .gap(0.0);
+                for (index, child) in block.children().iter().enumerate() {
+                    for (sub, range) in gaps[index].0.iter().enumerate() {
+                        content = content.child(self.marker_row(
+                            id.with(("marker-line", index, sub)),
+                            id.with(("marker", index, sub)),
+                            id.with(("marker-body", index, sub)),
+                            range.clone(),
+                            inner,
+                            cx,
+                        ));
+                    }
+                    path.push(index);
+                    let mut body = Decl::container(id.with(("quote", index)), NodeKind::Column)
+                        .size(SizeClass::hug(0.0, 0.0))
+                        .gap(0.0);
+                    let (cell, room) = match gaps[index].1.clone() {
+                        Some(range) => {
+                            let shown = self.line_active(range.end, cx);
+                            let text = self.source_text(&range);
+                            let room = if shown {
+                                self.text_advance(&text, cx).unwrap_or(0.0)
+                            } else {
+                                0.0
+                            };
+                            let cell = self.prefix_view(
+                                id.with(("prefix", index)),
+                                range,
+                                shown,
+                                cx,
+                            );
+                            let room = if shown { room + self.size * 0.35 } else { 0.0 };
+                            (Some(cell), room)
+                        }
+                        None => (None, 0.0),
+                    };
+                    for decl in self.place(child, path, (inner - room).max(0.0), cx) {
+                        body = body.child(decl);
+                    }
+                    path.pop();
+                    let mut line = Decl::container(id.with(("line", index)), NodeKind::Row)
+                        .size(SizeClass::hug(0.0, 0.0))
+                        .cross_align(0.0)
+                        .cross_pos(0.0)
+                        .gap(if room > 0.0 { self.size * 0.35 } else { 0.0 });
+                    if let Some(cell) = cell {
+                        line = line.child(cell);
+                    }
+                    content = content.child(line.child(body));
+                }
+                for (sub, range) in tail_markers.iter().enumerate() {
+                    content = content.child(self.marker_row(
+                        id.with(("tail-marker-line", sub)),
+                        id.with(("tail-marker", sub)),
+                        id.with(("tail-marker-body", sub)),
+                        range.clone(),
+                        inner,
+                        cx,
+                    ));
+                }
+                // A line holding only quote markers — the `> ` a break writes — is drawn by
+                // no child block, so the caret a break puts there would stand on bytes
+                // nothing shows.
+                if let Some((prefix, at)) = tail {
+                    let shown = self.line_active(prefix.end, cx);
+                    let text = self.source_text(&prefix);
+                    let room = if shown {
+                        self.text_advance(&text, cx).unwrap_or(0.0)
+                    } else {
+                        0.0
+                    };
+                    let caret = cx
+                        .core()
+                        .caret_for(self.id)
+                        .filter(|caret| *caret == at)
+                        .map(|_| 0);
+                    let line = self.tail_view(
+                        id.with("quote-tail"),
+                        at,
+                        (inner - room).max(0.0),
+                        caret,
+                    );
+                    content = content.child(
+                        Decl::container(id.with("tail"), NodeKind::Row)
+                            .size(SizeClass::hug(0.0, 0.0))
+                            .cross_align(0.0)
+                            .cross_pos(0.0)
+                            .child(self.prefix_view(
+                                id.with("tail-prefix"),
+                                prefix,
+                                shown,
+                                cx,
+                            ))
+                            .child(line),
+                    );
+                }
+                // The bar stays while the caret is inside: it is the quote's own mark, and
+                // the line's `> ` is only the byte under the caret.
+                let bar = Decl::container(id.with("bar"), NodeKind::Row)
+                    .size(SizeClass {
+                        width: AxisSize::fixed(QUOTE_BAR),
+                        height: AxisSize::fill(0.0, 0.0),
+                        grow_x: Grow::No,
+                        grow_y: Grow::Yes,
+                    })
+                    .background(self.muted, Corners::all(2.0));
+                vec![
+                    Decl::container(id, NodeKind::Row)
+                        .size(SizeClass::hug(0.0, 0.0))
+                        .child(bar)
+                        .child(content),
+                ]
+            }
+            BlockKind::BulletList | BlockKind::OrderedList { .. } => {
+                vec![self.list(block, id, path, width, cx)]
+            }
+            BlockKind::ListItem { .. } => self.children(block, path, width, cx),
+            BlockKind::Table { .. } => vec![self.table(block, id, width, cx)],
+            // A table places its own rows and cells; these arms are only reached by a
+            // malformed document whose row escaped its table.
+            BlockKind::TableRow { .. } => self.children(block, path, width, cx),
+            BlockKind::TableCell => {
+                vec![self.view(block, id, width, TextStyle::new(self.size), cx)]
+            }
+            BlockKind::FrontMatter => Vec::new(),
+        }
+    }
+
+    /// One fenced block: a card while the caret is away, its source while it is inside.
+    /// Head and foot take one code line each, so the card is as tall as the editing view.
+    fn code_block(
+        &self,
+        block: &Block,
+        id: Id,
+        width: f32,
+        language: Option<&str>,
+        cx: &crate::Cx<'_, '_>,
+    ) -> Decl {
+        let style = self.code_text_style();
+        let line = self.code_line_height(cx);
+        let inner = (width - CODE_CARD_PAD * 2.0).max(0.0);
+        let header = id.with("header");
+        let copy = header.with("copy");
+        // A press on the copy button also lands the caret in the block. Keep the card up
+        // and answer the click here, or the button vanishes before its release names it.
+        let copying = cx.core().pressed_within(copy) || cx.core().clicked_within(copy);
+        if cx.core().clicked_within(copy) {
+            cx.core().copy_text(self.source_text(&block.span));
+        }
+        let computed = match self.prepared {
+            Some(_) => None,
+            None => ui_richtext::project(self.document, block),
+        };
+        let projection = match (
+            self.prepared.and_then(|prepared| prepared.get(block)),
+            computed.as_ref(),
+        ) {
+            (Some(projection), _) => Some(projection),
+            (None, computed) => computed,
+        };
+        let editing = self.editable
+            && !copying
+            && projection.is_some_and(|projection| {
+                cx.core().focused() == Some(self.id)
+                    && self.selection_range(cx).is_some_and(|global| {
+                        global.start <= projection.span.end && projection.span.start <= global.end
+                    })
+            });
+        let mut card = Decl::container(id, NodeKind::Column)
+            .size(SizeClass {
+                width: AxisSize::fixed(width),
+                height: AxisSize::hug(0.0, 0.0),
+                grow_x: Grow::No,
+                grow_y: Grow::No,
+            })
+            // Zero vertical padding is what makes the head and foot one line each, and the
+            // equal side inset is what keeps the code's x still across the two states.
+            .padding(Insets {
+                left: CODE_CARD_PAD,
+                top: 0.0,
+                right: CODE_CARD_PAD,
+                bottom: 0.0,
+            })
+            .background(self.code_fill, Corners::all(CODE_CARD_RADIUS));
+        match (editing, projection) {
+            (true, Some(projection)) => {
+                card = card.child(self.projected_view(
+                    block,
+                    id.with("text"),
+                    inner,
+                    style,
+                    self.code_ink,
+                    None,
+                    projection,
+                    cx,
+                ));
+            }
+            _ => {
+                card = card
+                    .child(self.code_head(header, copy, language, inner, line, cx))
+                    .child(self.code_body(block, id.with("text"), language, inner, style, cx))
+                    .child(self.code_foot(id.with("footer"), inner, line, self.code_content(block).1, cx));
+            }
+        }
+        card
+    }
+
+    /// The card's head: the language on the left, copy on the right. Both fit in one code
+    /// line, which is the height the editing view gives the opening fence.
+    fn code_head(
+        &self,
+        id: Id,
+        copy: Id,
+        language: Option<&str>,
+        width: f32,
+        line: f32,
+        cx: &crate::Cx<'_, '_>,
+    ) -> Decl {
+        let label = language
+            .map(ui_richtext::language::language_label)
+            .filter(|label| !label.is_empty())
+            .unwrap_or_else(|| cx.t(Msg::WIDGETS_CODE_PLAIN_TEXT).to_string());
+        let copy_ink = if cx.core().hovered_within(copy) {
+            self.ink
+        } else {
+            self.muted
+        };
+        Decl::container(id, NodeKind::Row)
+            .size(SizeClass {
+                width: AxisSize::fixed(width),
+                height: AxisSize::fixed(line),
+                grow_x: Grow::No,
+                grow_y: Grow::No,
+            })
+            .cross_align(0.0)
+            .cross_pos(0.5)
+            .child(self.note_text(id.with("language"), label, self.muted))
+            .child(Decl::container(id.with("head-space"), NodeKind::Row).size(
+                SizeClass {
+                    width: AxisSize::fill(0.0, 0.0),
+                    height: AxisSize::hug(0.0, 0.0),
+                    grow_x: Grow::Yes,
+                    grow_y: Grow::No,
+                },
+            ))
+            .child(self.copy_button(copy, copy_ink, cx))
+    }
+
+    /// The card's copy affordance: the engine's own Copy wording beside the usual mark.
+    fn copy_button(&self, id: Id, ink: Color, cx: &crate::Cx<'_, '_>) -> Decl {
+        let label = cx.t(Msg::WIDGETS_MENU_COPY);
+        Decl::container(id, NodeKind::Row)
+            .size(SizeClass {
+                width: AxisSize::hug(0.0, 0.0),
+                height: AxisSize::hug(0.0, 0.0),
+                grow_x: Grow::No,
+                grow_y: Grow::No,
+            })
+            .sense(Sense::HOVER | Sense::CLICK)
+            .cursor(CursorShape::PointingHand)
+            .cross_align(0.0)
+            .cross_pos(0.5)
+            .gap(4.0)
+            .padding(Insets {
+                left: 4.0,
+                top: 0.0,
+                right: 4.0,
+                bottom: 0.0,
+            })
+            .child(crate::Icon::new(id.with("icon"), "content_copy", 14.0, ink).resolve())
+            .child(self.note_text(id.with("label"), label.to_string(), ink))
+    }
+
+    /// The card's body: the code without the fences. It stays an input view, so a press on
+    /// the card lands the caret in the block and the editing view takes over.
+    fn code_body(
+        &self,
+        block: &Block,
+        id: Id,
+        language: Option<&str>,
+        width: f32,
+        style: TextStyle,
+        cx: &crate::Cx<'_, '_>,
+    ) -> Decl {
+        let (range, lines) = self.code_content(block);
+        let text = self.source_text(&range);
+        let runs = match self.highlight(language, &text, style, None) {
+            Some(runs) => runs,
+            None => vec![TextRun::new(text, style)],
+        };
+        let mut decl = self.text_frame(
+            id,
+            Some(range),
+            runs,
+            Vec::new(),
+            self.code_ink,
+            AxisSize::fixed(width),
+            false,
+            cx,
+        );
+        // An empty fence has no code line, but a text node still owns one line box; that
+        // box would make the card a line taller than the source it replaces.
+        if lines == 0 {
+            decl.size_class.height = AxisSize::fixed(0.0);
+        }
+        decl
+    }
+
+    /// The card's foot: one code line, so the card's height matches the closing fence. The
+    /// count sits at its right edge; the row's fixed height is what keeps the note from
+    /// changing the card's height.
+    fn code_foot(&self, id: Id, width: f32, line: f32, lines: usize, cx: &crate::Cx<'_, '_>) -> Decl {
+        let mut row = Decl::container(id, NodeKind::Row)
+            .size(SizeClass {
+                width: AxisSize::fixed(width),
+                height: AxisSize::fixed(line),
+                grow_x: Grow::No,
+                grow_y: Grow::No,
+            })
+            .cross_align(0.0)
+            .cross_pos(0.5);
+        if lines == 0 {
+            return row;
+        }
+        let mut args = ui_i18n::Args::new();
+        args.set("count", lines as i64);
+        let count = cx.t_args(Msg::WIDGETS_CODE_LINE_COUNT, &args).to_string();
+        row = row
+            .child(Decl::container(id.with("foot-space"), NodeKind::Row).size(SizeClass {
+                width: AxisSize::fill(0.0, 0.0),
+                height: AxisSize::hug(0.0, 0.0),
+                grow_x: Grow::Yes,
+                grow_y: Grow::No,
+            }))
+            .child(self.note_text(id.with("count"), count, self.muted));
+        row
+    }
+
+    /// The code's bytes without the final line break, and how many lines they hold. The
+    /// break terminates the last line, so drawing drops it and the body is `lines` rows.
+    fn code_content(&self, block: &Block) -> (Range<usize>, usize) {
+        let text = self.document.source.get(block.span.clone()).unwrap_or("");
+        let drawn = text
+            .strip_suffix("\r\n")
+            .or_else(|| text.strip_suffix('\n'))
+            .unwrap_or(text);
+        (block.span.start..block.span.start + drawn.len(), text.lines().count())
+    }
+
+    fn code_text_style(&self) -> TextStyle {
+        TextStyle::new(self.size * 0.93).family(Family::Generic(GenericFamily::Monospace))
+    }
+
+    /// One code line's height, from the same measurer the body lays out with.
+    fn code_line_height(&self, cx: &crate::Cx<'_, '_>) -> f32 {
+        let block = TextBlock::plain("X", self.code_text_style());
+        cx.text_size(&block, f32::INFINITY)
+            .map(|size| size.h)
+            .unwrap_or(self.size * 0.93 * 1.4)
+    }
+
+    /// A head or foot note at the card's own small size, which never wraps.
+    fn note_text(&self, id: Id, text: String, ink: Color) -> Decl {
+        // A `nowrap` leaf's width is its hint's, so a `hug(0, 0)` note measured zero wide and
+        // spilled out of the card; the text control states that rule, so ask it instead.
+        crate::Text::new(id, text, CODE_CARD_NOTE, ink).nowrap().resolve()
+    }
+
+    /// The picture while the caret is away and its source while inside; both take the
+    /// scaled height, so entering it never moves the blocks below. No texture means source.
+    fn image_block(
+        &self,
+        block: &Block,
+        id: Id,
+        width: f32,
+        destination: &str,
+        cx: &crate::Cx<'_, '_>,
+    ) -> Decl {
+        let source = block.span.clone();
+        let text = self.source_text(&source);
+        let texture = self.image.and_then(|image| image(destination));
+        let height = texture.map(|texture| {
+            width * texture.height as f32 / texture.width.max(1) as f32
+        });
+        if let Some(texture) = texture {
+            let touched = self.editable
+                && self.selection_range(cx).is_some_and(|selection| {
+                    selection.start <= source.end && source.start <= selection.end
+                });
+            if !touched {
+                return self.image_view(id, texture, width, height.unwrap_or(0.0), source, cx);
+            }
+        }
+        self.image_source_view(id, source, text, width, height, cx)
+    }
+
+    /// The picture itself. In an editor it is also an input view with no drawn byte, so a
+    /// press on it lands the caret on the image's first byte and the source takes over.
+    fn image_view(
+        &self,
+        id: Id,
+        texture: ImageTexture,
+        width: f32,
+        height: f32,
+        source: Range<usize>,
+        _cx: &crate::Cx<'_, '_>,
+    ) -> Decl {
+        let kind = if self.editable {
+            NodeKind::Text
+        } else {
+            NodeKind::Row
+        };
+        let mut decl = Decl::container(id, kind)
+            .size(SizeClass {
+                width: AxisSize::fixed(width),
+                height: AxisSize::fixed(height),
+                grow_x: Grow::No,
+                grow_y: Grow::No,
+            })
+            .background_image(texture.id, ImageFit::Contain);
+        if self.editable {
+            let mut run = TextRun::new("", TextStyle::new(self.size));
+            run.hidden = true;
+            decl.data = NodeData::Text {
+                ink: Color::TRANSPARENT,
+                block: TextBlock {
+                    runs: vec![run],
+                    input_base: Some(source.start),
+                    ..Default::default()
+                },
+                caret: None,
+                selection: None,
+                composing: None,
+                nowrap: false,
+            };
+        }
+        decl
+    }
+
+    /// The image's own source line, shown while editing it or when the page has no texture.
+    /// A fixed height is the room the picture would take, so the document below stays put.
+    fn image_source_view(
+        &self,
+        id: Id,
+        source: Range<usize>,
+        text: String,
+        width: f32,
+        height: Option<f32>,
+        cx: &crate::Cx<'_, '_>,
+    ) -> Decl {
+        let run = TextRun::new(text, TextStyle::new(self.size));
+        let input = self.editable.then_some(source);
+        let mut decl = self.text_frame(
+            id,
+            input,
+            vec![run],
+            Vec::new(),
+            self.ink,
+            AxisSize::fixed(width),
+            false,
+            cx,
+        );
+        if let Some(height) = height {
+            decl.size_class.height = AxisSize::fixed(height);
+        }
+        decl
+    }
+
+    fn children(
+        &self,
+        block: &Block,
+        path: &mut Vec<usize>,
+        width: f32,
+        cx: &crate::Cx<'_, '_>,
+    ) -> Vec<Decl> {
+        let mut decls = Vec::new();
+        let mut previous_end = None;
+        for (index, child) in block.children().iter().enumerate() {
+            if let Some(end) = previous_end {
+                decls.extend(self.blank_rows(end, child.full.start, self.id, width, cx));
+            }
+            path.push(index);
+            decls.extend(self.place(child, path, width, cx));
+            path.pop();
+            previous_end = Some(child.full.end);
+        }
+        decls
+    }
+
+    /// The byte a task item is checked by: the flag inside the `[ ]` of its marker.
+    fn task_flag(&self, marker: &Range<usize>) -> Option<usize> {
+        let text = self.source_text(marker);
+        let open = text.find('[')?;
+        let flag = *text.as_bytes().get(open + 1)?;
+        matches!(flag, b' ' | b'x' | b'X').then_some(marker.start + open + 1)
+    }
+
+    /// A task item's box: a square control of its own, centred in the marker's column.
+    ///
+    /// The bytes `[ ]`/`[x]` are not drawn: they belong to the item's marker, which shows
+    /// itself when the caret stands on it, so the source stays editable.
+    fn task_box(&self, id: Id, checked: bool, cx: &crate::Cx<'_, '_>) -> Decl {
+        let side = TASK_BOX;
+        let (fill, stroke, check) = if checked {
+            (self.link_ink, self.link_ink, Some(Color::WHITE))
+        } else {
+            (Color::TRANSPARENT, self.muted, None)
+        };
+        let mut square = Decl::container(id.with("box"), NodeKind::Stack)
+            .size(SizeClass::fixed(side, side))
+            .stack_align(ui_core::layout::OverlayAlign::Center)
+            .background(fill, Corners::all(4.0))
+            .border(stroke, 1.5);
+        if let Some(ink) = check {
+            square = square.child(crate::Icon::new(id.with("check"), "check", 13.0, ink).resolve());
+        }
+        // The box sits on the first line's centre; its own width plus the padding after it
+        // is the room the item's text starts from.
+        let line = cx
+            .text_size(&TextBlock::plain("X", TextStyle::new(self.size)), f32::INFINITY)
+            .map(|size| size.h)
+            .unwrap_or(self.size * 1.3)
+            .max(side);
+        Decl::container(id, NodeKind::Stack)
+            .size(SizeClass::fixed(side, line))
+            // A press on the box is the box's, not the paragraph's: no caret moves.
+            .sense(if self.editable {
+                ui_core::Sense::CLICK
+            } else {
+                ui_core::Sense::NONE
+            })
+            .padding(Insets {
+                right: self.size * 0.3,
+                ..Insets::default()
+            })
+            .stack_align_axes(
+                ui_core::layout::OverlayAlign::End,
+                ui_core::layout::OverlayAlign::Center,
+            )
+            .child(square)
+    }
+
+    /// A list's items: each one's marker and its content.
+    ///
+    /// The marker is source text of its own, so the caret can step onto it and delete it
+    /// like any other byte. Each item's marker takes only its own width: the label while
+    /// the caret is away, the bytes as written while it is in the item. A list therefore
+    /// does not hold one common column, and its text moves when the caret arrives.
+    fn list(
+        &self,
+        block: &Block,
+        id: Id,
+        path: &mut Vec<usize>,
+        width: f32,
+        cx: &crate::Cx<'_, '_>,
+    ) -> Decl {
+        let global = self.selection_range(cx).unwrap_or(0..0);
+        let mut column = Decl::container(id, NodeKind::Column)
+            .size(SizeClass::hug(0.0, 0.0))
+            .gap(0.0);
+        for (index, item) in block.children().iter().enumerate() {
+            let marker = ui_richtext::marker(self.document, item);
+            // A reader sees the label a list is set with; the bytes the item is written
+            // with belong to the caret that stands in that item.
+            let touched = self.editable
+                && global.start <= item.span.end
+                && item.span.start <= global.end;
+            let written = marker.as_ref().map(|source| self.source_text(source));
+            let label = written.as_deref().map(label_of);
+            let task = match item.kind {
+                BlockKind::ListItem { task } => task,
+                _ => None,
+            };
+            let mut row = Decl::container(id.with(("row", index)), NodeKind::Row)
+                .size(SizeClass::hug(0.0, 0.0))
+                .cross_align(0.0)
+                .cross_pos(0.0);
+            let mut lead = 0.0;
+            // A marker ends in a space, and a line hangs its trailing whitespace: the gap
+            // the marker spells is put back here, where it cannot be hung.
+            let gap = self.size * 0.35;
+            if let Some(source) = &marker {
+                let task_id = id.with(("task", index));
+                // The box is a control: a press flips its byte, wherever the caret is.
+                if let Some(checked) = task
+                    && !touched
+                    && self.editable
+                    && cx.core().clicked_within(task_id)
+                    && let Some(at) = self.task_flag(source)
+                {
+                    let to = if checked { " " } else { "x" };
+                    cx.core().edit_input_detached(self.id, at..at + 1, to);
+                }
+                let mut decl = if touched {
+                    self.marker_view(id.with(("marker", index)), source.clone(), cx)
+                } else if let Some(checked) = task {
+                    self.task_box(task_id, checked, cx)
+                } else {
+                    self.label_view(id.with(("label", index)), label.clone().unwrap_or_default())
+                };
+                // The item's own text draws the caret at the offset this marker ends on; a
+                // second one here would sit a hung space to the left of it.
+                drop_shared_caret(&mut decl, self.source_text(source).len());
+                lead = if touched {
+                    self.text_advance(&self.source_text(source), cx).unwrap_or(0.0)
+                } else if task.is_some() {
+                    TASK_BOX + self.size * 0.3
+                } else {
+                    self.text_advance(&label.unwrap_or_default(), cx).unwrap_or(0.0)
+                };
+                row = row.gap(gap).child(decl);
+                lead += gap;
+            }
+            let mut content = Decl::container(id.with(("item", index)), NodeKind::Column)
+                .size(SizeClass::hug(0.0, 0.0))
+                .gap(0.0);
+            path.push(index);
+            for (child_index, child) in item.children().iter().enumerate() {
+                path.push(child_index);
+                for decl in self.place(child, path, (width - lead).max(0.0), cx) {
+                    content = content.child(decl);
+                }
+                path.pop();
+            }
+            path.pop();
+            column = column.child(row.child(content));
+        }
+        column
+    }
+
+    /// One table: a grid while the caret is away, its whole source while it is inside.
+    /// Editing a cell in place is not a v1 feature.
+    fn table(&self, block: &Block, id: Id, width: f32, cx: &crate::Cx<'_, '_>) -> Decl {
+        let alignments: &[TableAlignment] = match &block.kind {
+            BlockKind::Table { alignments } => alignments,
+            _ => &[],
+        };
+        let column = Decl::container(id, NodeKind::Column).size(SizeClass {
+            width: AxisSize::fixed(width),
+            height: AxisSize::hug(0.0, 0.0),
+            grow_x: Grow::No,
+            grow_y: Grow::No,
+        });
+        // The trailing line break ends the table: a caret just past it belongs to whatever
+        // follows, not to the table whose source view would then cover that line.
+        let bytes = self.document.source.as_bytes();
+        let mut end = block.span.end;
+        while end > block.span.start && matches!(bytes.get(end - 1), Some(b'\n' | b'\r')) {
+            end -= 1;
+        }
+        let editing = self.editable
+            && cx.core().focused() == Some(self.id)
+            && self
+                .selection_range(cx)
+                .is_some_and(|selection| selection.start <= end && block.span.start <= selection.end);
+        if editing {
+            let computed = match self.prepared {
+                Some(_) => None,
+                None => ui_richtext::project(self.document, block),
+            };
+            let projection = match (
+                self.prepared.and_then(|prepared| prepared.get(block)),
+                computed.as_ref(),
+            ) {
+                (Some(projection), _) => Some(projection),
+                (None, computed) => computed,
+            };
+            if let Some(projection) = projection {
+                // The source state reads as code: monospace keeps the pipes in columns.
+                let style = TextStyle::new(self.size)
+                    .family(Family::Generic(GenericFamily::Monospace));
+                return column.child(self.projected_view(
+                    block,
+                    id.with("text"),
+                    width,
+                    style,
+                    self.ink,
+                    None,
+                    projection,
+                    cx,
+                ));
+            }
+        }
+        column.child(self.table_grid(block, id.with("grid"), width, alignments, cx))
+    }
+
+    /// The grid a table reads as: a header row, a rule, then the body rows. Columns keep
+    /// their widest cell and share the available width when together they exceed it.
+    fn table_grid(
+        &self,
+        block: &Block,
+        id: Id,
+        width: f32,
+        alignments: &[TableAlignment],
+        cx: &crate::Cx<'_, '_>,
+    ) -> Decl {
+        let rows = block.children();
+        let columns = alignments
+            .len()
+            .max(rows.iter().map(|row| row.children().len()).max().unwrap_or(0))
+            .max(1);
+        let header = rows
+            .first()
+            .is_some_and(|row| matches!(row.kind, BlockKind::TableRow { header: true }));
+        // Build each cell's display block once: it is measured for the column, then placed.
+        let empty = TextBlock::plain("", TextStyle::new(self.size));
+        let cells: Vec<Vec<TextBlock>> = rows
+            .iter()
+            .enumerate()
+            .map(|(row_index, row)| {
+                let bold = header && row_index == 0;
+                (0..columns)
+                    .map(|column| {
+                        row.children()
+                            .get(column)
+                            .map(|cell| self.table_cell_text(cell, bold, cx))
+                            .unwrap_or_else(|| empty.clone())
+                    })
+                    .collect()
+            })
+            .collect();
+        let mut wants = vec![0.0f32; columns];
+        for row in &cells {
+            for (column, text) in row.iter().enumerate() {
+                wants[column] = wants[column].max(self.table_cell_want(text, cx));
+            }
+        }
+        // Each column keeps its max-content width; together they may not exceed the width
+        // the block was given, so an over-wide table shares what is left proportionally.
+        let padding = TABLE_CELL_PAD * 2.0;
+        let available = (width - padding * columns as f32).max(0.0);
+        let wanted: f32 = wants.iter().sum();
+        let scale = if wanted > available && wanted > 0.0 {
+            available / wanted
+        } else {
+            1.0
+        };
+        let widths: Vec<f32> = wants
+            .iter()
+            .map(|want| want * scale + padding)
+            .collect();
+
+        // Track order mirrors rows, with one fixed track for the rule after the header.
+        let mut row_tracks = Vec::with_capacity(rows.len() + 1);
+        let mut grid_row = Vec::with_capacity(rows.len());
+        for (index, _) in rows.iter().enumerate() {
+            if header && index == 1 {
+                row_tracks.push(Track::Fixed(TABLE_SEPARATOR));
+            }
+            grid_row.push(row_tracks.len() as u32);
+            row_tracks.push(Track::Auto);
+        }
+        let mut grid = Decl::container(id, NodeKind::Grid)
+            .size(SizeClass {
+                width: AxisSize::fixed(width),
+                height: AxisSize::hug(0.0, 0.0),
+                grow_x: Grow::No,
+                grow_y: Grow::No,
+            })
+            .tracks(TrackList {
+                cols: widths.iter().copied().map(Track::Fixed).collect(),
+                rows: row_tracks,
+                auto_flow: AutoFlow::Row,
+            })
+            .gap(0.0);
+        for (row_index, row) in cells.into_iter().enumerate() {
+            for (column, text) in row.into_iter().enumerate() {
+                let cell = self.table_cell(
+                    id.with(("cell", row_index, column)),
+                    text,
+                    widths[column],
+                    column_alignment(alignments.get(column)),
+                    block.span.start,
+                );
+                grid = grid.child(cell.grid_area(grid_row[row_index], column as u32, 1, 1));
+            }
+        }
+        if header && rows.len() > 1 {
+            grid = grid.child(
+                Decl::container(id.with("rule"), NodeKind::Box)
+                    .size(SizeClass {
+                        width: AxisSize::fill(0.0, 0.0),
+                        height: AxisSize::fixed(TABLE_SEPARATOR),
+                        grow_x: Grow::No,
+                        grow_y: Grow::No,
+                    })
+                    .background(self.muted, Corners::ZERO)
+                    .grid_area(1, 0, 1, columns as u32),
+            );
+        }
+        grid
+    }
+
+    /// A cell's text as a reader sees it, with the header row in bold.
+    fn table_cell_text(
+        &self,
+        cell: &Block,
+        header: bool,
+        cx: &crate::Cx<'_, '_>,
+    ) -> TextBlock {
+        let base = TextStyle::new(self.size);
+        let mut text = ui_richtext::to_text_block(
+            self.document,
+            cell,
+            base,
+            |run, marks| self.look_kinds(run, marks),
+            |marks, source| self.inline_object(marks, source, base, cx),
+        );
+        if header {
+            for run in &mut text.runs {
+                run.style.weight = Weight::BOLD;
+            }
+        }
+        text
+    }
+
+    /// A cell's max-content width, or an estimate when the host has no text measurer.
+    fn table_cell_want(&self, text: &TextBlock, cx: &crate::Cx<'_, '_>) -> f32 {
+        if text.is_empty() {
+            return 0.0;
+        }
+        match cx.text_size(text, f32::INFINITY) {
+            Some(size) => size.w,
+            None => {
+                let flat: String = text.runs.iter().map(|run| run.text.as_str()).collect();
+                flat.chars().count() as f32 * self.size * 0.6
+            }
+        }
+    }
+
+    /// One grid cell: a fixed-width text leaf aligned inside its column. Its base is the
+    /// table's first byte, so a press on it enters the table's source state.
+    fn table_cell(
+        &self,
+        id: Id,
+        mut text: TextBlock,
+        width: f32,
+        align: TextAlign,
+        base: usize,
+    ) -> Decl {
+        if text.runs.is_empty() {
+            text.runs.push(TextRun::new("", TextStyle::new(self.size)));
+        }
+        text.align = align;
+        let mut decl = Decl::container(id, NodeKind::Text)
+            .size(SizeClass {
+                width: AxisSize::fixed(width),
+                height: AxisSize::hug(0.0, 0.0),
+                grow_x: Grow::No,
+                grow_y: Grow::No,
+            })
+            .padding(Insets {
+                left: TABLE_CELL_PAD,
+                top: TABLE_CELL_PAD_Y,
+                right: TABLE_CELL_PAD,
+                bottom: TABLE_CELL_PAD_Y,
+            });
+        if self.editable {
+            decl = decl.sense(Sense::CLICK);
+        }
+        decl.data = NodeData::Text {
+            ink: self.ink,
+            block: TextBlock {
+                input_base: self.editable.then_some(base),
+                ..text
+            },
+            caret: None,
+            selection: None,
+            composing: None,
+            nowrap: false,
+        };
+        decl
+    }
+
+    /// The room a piece of source takes, trailing spaces included: a line hangs that white,
+    /// so a sentinel after the text makes it ink.
+    /// The bytes of the source a range covers, or nothing when it no longer fits it.
+    fn source_text(&self, source: &Range<usize>) -> String {
+        self.document.source.get(source.clone()).unwrap_or("").to_owned()
+    }
+
+    /// The room a piece of text takes at the body size, from the host's own measurer.
+    fn text_advance(&self, text: &str, cx: &crate::Cx<'_, '_>) -> Option<f32> {
+        let block = TextBlock::plain(text.to_owned(), TextStyle::new(self.size));
+        cx.text_size(&block, f32::INFINITY).map(|size| size.w)
+    }
+
+    /// The label a hidden marker gives way to, drawn in the marker's own cell so the text
+    /// beside it does not move.
+    fn label_view(&self, id: Id, label: String) -> Decl {
+        let mut decl = Decl::container(id, NodeKind::Text).size(SizeClass {
+            // A nowrap leaf is capped by its hint, so the hint must stay open.
+            width: AxisSize::hug(0.0, f32::INFINITY),
+            height: AxisSize::hug(0.0, 0.0),
+            grow_x: Grow::No,
+            grow_y: Grow::No,
+        });
+        decl.data = NodeData::Text {
+            ink: self.muted,
+            block: TextBlock::plain(label, TextStyle::new(self.size)),
+            caret: None,
+            selection: None,
+            composing: None,
+            nowrap: true,
+        };
+        decl
+    }
+
+    fn marker_view(&self, id: Id, source: Range<usize>, cx: &crate::Cx<'_, '_>) -> Decl {
+        let run = TextRun::new(self.source_text(&source), TextStyle::new(self.size));
+        self.text_frame(
+            id,
+            Some(source),
+            vec![run],
+            Vec::new(),
+            self.muted,
+            AxisSize::hug(0.0, f32::INFINITY),
+            true,
+            cx,
+        )
+    }
+
+    /// A quote line's own prefix: `> ` while the caret is on that line, and no width while
+    /// it is away — the bar beside the line says it is quoted. The bytes stay part of the
+    /// input, so the caret can reach and delete them.
+    fn prefix_view(
+        &self,
+        id: Id,
+        source: Range<usize>,
+        shown: bool,
+        cx: &crate::Cx<'_, '_>,
+    ) -> Decl {
+        let text = self.source_text(&source);
+        let end = text.len();
+        let mut run = TextRun::new(text, TextStyle::new(self.size));
+        run.hidden = !shown;
+        // While the prefix is hidden it is a cell of the line's own, not a view: a press in
+        // the gutter then belongs to the line's text, where a press used to land, rather
+        // than to a byte nothing shows.
+        let view = shown.then_some(source);
+        let mut decl = self.text_frame(
+            id,
+            view,
+            vec![run],
+            Vec::new(),
+            self.muted,
+            AxisSize::hug(0.0, f32::INFINITY),
+            true,
+            cx,
+        );
+        drop_shared_caret(&mut decl, end);
+        decl
+    }
+
+    /// One quote line that holds only its markers: the prefix, then the empty line the
+    /// caret after it stands on. Both are views, so the bytes can be reached and deleted.
+    fn marker_row(
+        &self,
+        row: Id,
+        marker: Id,
+        body: Id,
+        source: Range<usize>,
+        width: f32,
+        cx: &crate::Cx<'_, '_>,
+    ) -> Decl {
+        let shown = self.line_active(source.end, cx);
+        let text = self.source_text(&source);
+        let room = if shown {
+            self.text_advance(&text, cx).unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        let caret = cx
+            .core()
+            .caret_for(self.id)
+            .filter(|at| *at == source.end)
+            .map(|_| 0);
+        let cell = self.prefix_view(marker, source.clone(), shown, cx);
+        Decl::container(row, NodeKind::Row)
+            .size(SizeClass::hug(0.0, 0.0))
+            .cross_align(0.0)
+            .cross_pos(0.0)
+            .child(cell)
+            .child(self.tail_view(body, source.end, (width - room).max(0.0), caret))
+    }
+
+    /// The caret or selection in the document's offsets, or nothing while the editor holds
+    /// neither — a caret at zero is not the same as no caret at all.
+    fn selection_range(&self, cx: &crate::Cx<'_, '_>) -> Option<Range<usize>> {
+        cx.core()
+            .selection_for(self.id)
+            .map(|selection| selection.range())
+            .or_else(|| cx.core().caret_for(self.id).map(|at| at..at))
+    }
+
+    /// Whether the caret or selection is on the source line that holds `at`.
+    fn line_active(&self, at: usize, cx: &crate::Cx<'_, '_>) -> bool {
+        let Some(selection) = self.selection_range(cx) else {
+            return false;
+        };
+        let lines = ui_richtext::line_bounds(self.document.source.as_str(), &selection);
+        lines.start <= at && at <= lines.end
+    }
+
+    /// One leaf, drawn as the editor's buffer or as the document reads.
+    fn view(
+        &self,
+        block: &Block,
+        id: Id,
+        width: f32,
+        style: TextStyle,
+        cx: &crate::Cx<'_, '_>,
+    ) -> Decl {
+        let (ink, background) = match &block.kind {
+            BlockKind::CodeBlock { .. } => (self.code_ink, Some(self.code_fill)),
+            _ => (self.ink, None),
+        };
+        if !self.editable {
+            return self.rendered_view(block, id, width, style, ink, background, cx);
+        }
+        let computed = match self.prepared {
+            Some(_) => None,
+            None => ui_richtext::project(self.document, block),
+        };
+        let projection = match (
+            self.prepared.and_then(|prepared| prepared.get(block)),
+            computed.as_ref(),
+        ) {
+            (Some(projection), _) => Some(projection),
+            (None, computed) => computed,
+        };
+        let Some(projection) = projection else {
+            return self.text_frame(
+                id,
+                None,
+                Vec::new(),
+                Vec::new(),
+                ink,
+                AxisSize::fixed(width),
+                false,
+                cx,
+            );
+        };
+        self.projected_view(block, id.with("text"), width, style, ink, background, projection, cx)
+    }
+
+    /// The editing view of a projected leaf: the frames cut to runs, with syntax shown where
+    /// the caret is. The caller supplies the projection, so a card and the editor share one
+    /// cut of the block.
+    #[allow(clippy::too_many_arguments)]
+    fn projected_view(
+        &self,
+        block: &Block,
+        id: Id,
+        width: f32,
+        style: TextStyle,
+        ink: Color,
+        background: Option<Color>,
+        projection: &ui_richtext::Projection,
+        cx: &crate::Cx<'_, '_>,
+    ) -> Decl {
+        let focused = cx.core().focused() == Some(self.id);
+        let src = self.document.source.as_str();
+        let global = self.selection_range(cx).unwrap_or(0..0);
+        // The projection answers in document offsets, which is what the selection is in;
+        // only the caret and the highlight need this block's own coordinates. Touching this
+        // block is what makes it the edited one: with one input over the whole source,
+        // focus alone names no block.
+        let touches = global.start <= projection.span.end && projection.span.start <= global.end;
+        let constructs = &projection.constructs;
+        // A page that highlights owns the whole content of a fenced block: its runs replace
+        // the block's content runs, byte for byte, so offsets still line up.
+        let mut styled = match &block.kind {
+            BlockKind::CodeBlock { language } => {
+                let content: String = projection
+                    .runs
+                    .iter()
+                    .filter(|run| run.syntax.is_none())
+                    .map(|run| run.text.as_str())
+                    .collect();
+                self.highlight(language.as_deref(), &content, style, background)
+            }
+            _ => None,
+        };
+        let mut runs = Vec::new();
+        let mut atoms = Vec::new();
+        for shown in projection.shown(src, &global, focused && touches) {
+            let syntax = shown
+                .run
+                .syntax
+                .is_some_and(|index| constructs.get(index).is_some());
+            if !syntax
+                && let Some(styled) = styled.take()
+            {
+                runs.extend(styled);
+                continue;
+            }
+            let mut run = TextRun::new(shown.run.text.clone(), style);
+            run.hidden = shown.hidden;
+            if !shown.hidden {
+                if syntax {
+                    run.ink = Some(self.marker_ink);
+                } else if let Some(atom) =
+                    self.formula(shown.run, shown.run.source.start - projection.span.start, &global, cx)
+                {
+                    // The bytes stay, their glyphs do not: the box is drawn in their place
+                    // and the caret reads its edges as source offsets.
+                    run.hidden = true;
+                    atoms.push(atom);
+                } else if let Some(atom) = self.entity(
+                    shown.run,
+                    shown.run.source.start - projection.span.start,
+                    &global,
+                    style,
+                    cx,
+                ) {
+                    run.hidden = true;
+                    atoms.push(atom);
+                } else {
+                    self.look(&mut run, shown.run.source.clone());
+                }
+            }
+            if let Some(fill) = background {
+                run.background = Some(fill);
+            }
+            runs.push(run);
+        }
+        self.text_frame(
+            id,
+            Some(projection.span.clone()),
+            runs,
+            atoms,
+            ink,
+            AxisSize::fixed(width),
+            false,
+            cx,
+        )
+    }
+
+    /// The box an inline formula draws in place of its source, while the caret is away from
+    /// the mark; with the caret inside it, the source is drawn as written instead.
+    fn formula(
+        &self,
+        run: &ui_richtext::Run,
+        at: usize,
+        global: &Range<usize>,
+        cx: &crate::Cx<'_, '_>,
+    ) -> Option<AtomBox> {
+        let marks = self.document.marks_in(run.source.clone());
+        let mark = marks.iter().find(|mark| mark.kind == MarkKind::InlineMath)?;
+        let revealed = global.start <= mark.full.end && mark.full.start <= global.end;
+        if revealed {
+            return None;
+        }
+        let object = self.inline_object(&[&mark.kind], &run.text, TextStyle::new(self.size), cx)?;
+        let mut atom = AtomBox::new(at, object.size()).spanning(run.text.len());
+        atom.baseline = object.baseline();
+        atom.object = Some(object);
+        Some(atom)
+    }
+
+    /// The character an entity stands for, drawn in place of its written form while the
+    /// caret is away; the atom spans the entity's bytes, so no offset after it moves.
+    fn entity(
+        &self,
+        run: &ui_richtext::Run,
+        at: usize,
+        global: &Range<usize>,
+        base: TextStyle,
+        cx: &crate::Cx<'_, '_>,
+    ) -> Option<AtomBox> {
+        let marks = self.document.marks_in(run.source.clone());
+        let mark = marks.iter().find(|mark| mark.kind == MarkKind::Entity)?;
+        let revealed = global.start <= mark.full.end && mark.full.start <= global.end;
+        if revealed {
+            return None;
+        }
+        let text = ui_richtext::entity::decode(&run.text)?;
+        let mut styled = TextRun::new("", base);
+        let kinds: Vec<&MarkKind> = marks.iter().map(|mark| &mark.kind).collect();
+        self.look_kinds(&mut styled, &kinds);
+        let ink = styled.ink.unwrap_or(self.ink);
+        let object = self.glyph_object(text, styled.style, ink, cx)?;
+        let mut atom = AtomBox::new(at, object.size()).spanning(run.text.len());
+        atom.baseline = object.baseline();
+        atom.object = Some(object);
+        Some(atom)
+    }
+
+    /// The block as a reader sees it: the document's decoded text, each inline formula as
+    /// a box of its own, and none of the syntax that produced them.
+    #[allow(clippy::too_many_arguments)]
+    fn rendered_view(
+        &self,
+        block: &Block,
+        id: Id,
+        width: f32,
+        style: TextStyle,
+        ink: Color,
+        background: Option<Color>,
+        cx: &crate::Cx<'_, '_>,
+    ) -> Decl {
+        let mut text = ui_richtext::to_text_block(
+            self.document,
+            block,
+            style,
+            |run, marks| self.look_kinds(run, marks),
+            |marks, source| self.inline_object(marks, source, style, cx),
+        );
+        if let BlockKind::CodeBlock { language } = &block.kind {
+            let content: String = text.runs.iter().map(|run| run.text.as_str()).collect();
+            if let Some(styled) = self.highlight(language.as_deref(), &content, style, background) {
+                text.runs = styled;
+                text.atoms.clear();
+            }
+        }
+        for run in &mut text.runs {
+            if run.background.is_none() {
+                run.background = background;
+            }
+        }
+        self.text_frame(
+            id.with("text"),
+            None,
+            text.runs,
+            text.atoms,
+            ink,
+            AxisSize::fixed(width),
+            false,
+            cx,
+        )
+    }
+
+    /// A text node drawing one range of the buffer: a block's frame, or a container's
+    /// marker. `None` draws runs that name no buffer position.
+    ///
+    /// The caret and the selection belong to the input and are in buffer offsets, while
+    /// the node draws offsets local to its own range; both are mapped here, once, so every
+    /// view maps them the same way.
+    #[allow(clippy::too_many_arguments)]
+    fn text_frame(
+        &self,
+        id: Id,
+        source: Option<Range<usize>>,
+        mut runs: Vec<TextRun>,
+        atoms: Vec<AtomBox>,
+        ink: Color,
+        width: AxisSize,
+        nowrap: bool,
+        cx: &crate::Cx<'_, '_>,
+    ) -> Decl {
+        let selection = cx.core().selection_for(self.id);
+        let caret = cx.core().caret_for(self.id);
+        let preedit = cx.core().preedit_for(self.id);
+        let (base, mut caret_at, mut selection_prim) = match &source {
+            Some(range) => {
+                let at = caret
+                    .filter(|at| range.start <= *at && *at <= range.end)
+                    .map(|at| at - range.start);
+                let prim = selection
+                    .filter(|selection| !selection.is_collapsed())
+                    .and_then(|selection| {
+                        let selected = selection.range();
+                        let low = selected.start.clamp(range.start, range.end);
+                        let high = selected.end.clamp(range.start, range.end);
+                        (low < high).then(|| ui_core::SelectionPrim {
+                            range: low - range.start..high - range.start,
+                            fill: self.selection_fill,
+                            painter: self.selection_painter,
+                        })
+                    });
+                (Some(range.start), at, prim)
+            }
+            None => (None, None, None),
+        };
+
+        let mut composing = None;
+        if let (Some(preedit), Some(at)) = (preedit.as_ref(), caret_at)
+            && !preedit.is_empty()
+        {
+            // Only the view holding the caret composes; the preedit takes the caret's
+            // place in this view's own text.
+            let value: String = runs.iter().map(|run| run.text.as_str()).collect();
+            let (_, range, mapped) = crate::text::typed_input(&value, Some(at), Some(preedit));
+            let style = runs
+                .first()
+                .map(|run| run.style)
+                .unwrap_or(TextStyle::new(self.size));
+            runs = splice(runs, at, &preedit.text, style);
+            caret_at = mapped;
+            selection_prim = None;
+            composing = range;
+        }
+        // A frame with no run — an empty item, an empty fence — still occupies a line, and
+        // that line is where the caret goes. One empty run gives the view its line box.
+        if runs.is_empty() {
+            runs.push(TextRun::new("", TextStyle::new(self.size)));
+        }
+
+        let mut text = Decl::container(id, NodeKind::Text).size(SizeClass {
+            width,
+            height: AxisSize::hug(0.0, 0.0),
+            grow_x: Grow::No,
+            grow_y: Grow::No,
+        });
+        // A reader has no caret to place, so the node joins no input: a text node that
+        // names a buffer position is a view, and a view belongs to an editing control.
+        if self.editable {
+            text = text.sense(Sense::CLICK);
+        }
+        text.data = NodeData::Text {
+            ink,
+            block: TextBlock {
+                runs,
+                atoms,
+                input_base: base.filter(|_| self.editable),
+                ..Default::default()
+            },
+            caret: caret_at.map(|offset| ui_core::Caret {
+                offset,
+                color: self.caret_ink,
+            }),
+            selection: selection_prim,
+            composing,
+            nowrap,
+        };
+        text
+    }
+
+    /// The empty line a source that ends in a break leaves after its last block.
+    fn tail_view(&self, id: Id, base: usize, width: f32, caret: Option<usize>) -> Decl {
+        let mut text = Decl::container(id, NodeKind::Text)
+            .size(SizeClass {
+                width: AxisSize::fixed(width),
+                height: AxisSize::hug(0.0, 0.0),
+                grow_x: Grow::No,
+                grow_y: Grow::No,
+            })
+            .sense(Sense::CLICK);
+        text.data = NodeData::Text {
+            ink: self.ink,
+            block: TextBlock {
+                runs: vec![TextRun::new("", TextStyle::new(self.size))],
+                input_base: Some(base),
+                ..Default::default()
+            },
+            caret: caret.map(|offset| ui_core::Caret {
+                offset,
+                color: self.caret_ink,
+            }),
+            selection: None,
+            composing: None,
+            nowrap: false,
+        };
+        text
+    }
+
+    /// One empty row per blank source line between two blocks.
+    ///
+    /// Every line break is one line, so the count comes straight from the source and no
+    /// block gap stands in for a line: three blank lines draw three rows, and the caret can
+    /// stand on each of them.
+    fn blank_rows(
+        &self,
+        from: usize,
+        to: usize,
+        id: Id,
+        width: f32,
+        cx: &crate::Cx<'_, '_>,
+    ) -> Vec<Decl> {
+        if to <= from {
+            return Vec::new();
+        }
+        let source = self.document.source.as_str();
+        let caret = cx.core().caret_for(self.id);
+        let mut rows = Vec::new();
+        for run in ui_richtext::blank::blank_runs(source, from..to) {
+            for line in &run.lines {
+                // The caret stands on the line whose start it sits at, as in any empty line.
+                let at = caret.filter(|at| at == line).map(|_| 0);
+                rows.push(self.tail_view(id.with(("blank", *line)), *line, width, at));
+            }
+        }
+        rows
+    }
+
+    /// What each mark looks like: both modes read the same kinds, so a link is a link
+    /// whether or not it can be edited.
+    fn look(&self, run: &mut TextRun, source: Range<usize>) {
+        let marks = self.document.marks_in(source);
+        let kinds: Vec<&MarkKind> = marks.iter().map(|mark| &mark.kind).collect();
+        self.look_kinds(run, &kinds);
+    }
+
+    fn look_kinds(&self, run: &mut TextRun, marks: &[&MarkKind]) {
+        for mark in marks {
+            match mark {
+                MarkKind::Emphasis => run.style.italic = true,
+                MarkKind::Strong => run.style.weight = Weight::BOLD,
+                MarkKind::Strikethrough => run.strikethrough = Decoration::Single,
+                MarkKind::Code => {
+                    run.style.family = Family::Generic(GenericFamily::Monospace);
+                    run.background = Some(self.code_fill);
+                }
+                MarkKind::Link { .. } => {
+                    run.ink = Some(self.link_ink);
+                    run.underline = Decoration::Single;
+                }
+                MarkKind::InlineMath => {
+                    run.style.family = Family::Generic(GenericFamily::Monospace);
+                    run.ink = Some(self.link_ink);
+                }
+                // An entity looks like the characters it stands for: the run's own style.
+                MarkKind::Entity => {}
+                // v1 draws only a whole-paragraph image; an inline image keeps its alt text.
+                MarkKind::Image { .. } => {}
+            }
+        }
+    }
+
+    /// A formula mark becomes a box of its own: the math control lays its source out, and
+    /// the box keeps the mark's bytes where the caret expects them.
+    fn inline_object(
+        &self,
+        marks: &[&MarkKind],
+        source: &str,
+        base: TextStyle,
+        cx: &crate::Cx<'_, '_>,
+    ) -> Option<ui_core::InlineObject> {
+        if marks
+            .iter()
+            .any(|mark| matches!(mark, MarkKind::InlineMath))
+        {
+            // The id belongs to the node a standalone formula would build; inside a line
+            // the atom is the identity, so any id does.
+            return crate::math::Math::new(
+                Id::str("markdown-inline-math"),
+                source,
+                self.size,
+                self.link_ink,
+            )
+            .object_in(cx);
+        }
+        if !marks.iter().any(|mark| matches!(mark, MarkKind::Entity)) {
+            return None;
+        }
+        // The reading path already hands over the decoded character; the run's style is
+        // what the character would have been drawn with.
+        let mut run = TextRun::new("", base);
+        self.look_kinds(&mut run, marks);
+        self.glyph_object(source.to_owned(), run.style, run.ink.unwrap_or(self.ink), cx)
+    }
+
+    /// An entity's character as an inline object measured at its own style, so the atom's
+    /// box is exactly what the typesetter would give the text it stands for.
+    fn glyph_object(
+        &self,
+        text: String,
+        style: TextStyle,
+        ink: Color,
+        cx: &crate::Cx<'_, '_>,
+    ) -> Option<ui_core::InlineObject> {
+        let layout = cx.text_layout(&TextBlock::plain(text.clone(), style), f32::INFINITY)?;
+        Some(ui_core::InlineObject::Glyphs {
+            text,
+            style,
+            ink,
+            size: layout.size(),
+            baseline: layout.baseline,
+        })
+    }
+
+    /// A fenced block's runs as the page's highlighter sees them, when it has a grammar
+    /// for the language and its runs account for every byte of the content.
+    fn highlight(
+        &self,
+        language: Option<&str>,
+        content: &str,
+        style: TextStyle,
+        fill: Option<Color>,
+    ) -> Option<Vec<TextRun>> {
+        let mut runs = (self.code_style?)(language, content, style)?;
+        let bytes: usize = runs.iter().map(|run| run.text.len()).sum();
+        if bytes != content.len() {
+            return None;
+        }
+        for run in &mut runs {
+            if run.background.is_none() {
+                run.background = fill;
+            }
+        }
+        Some(runs)
+    }
+}
+
+/// A table column's alignment, or left when the delimiter row names none.
+fn column_alignment(alignment: Option<&TableAlignment>) -> TextAlign {
+    match alignment {
+        Some(TableAlignment::Center) => TextAlign::Center,
+        Some(TableAlignment::Right) => TextAlign::End,
+        Some(TableAlignment::None | TableAlignment::Left) | None => TextAlign::Start,
+    }
+}
+
+/// What a marker stands for while the caret is away from its item: a bullet for any of
+/// CommonMark's three bullet characters, otherwise the number or letter as written.
+/// The label a list marker stands for, indentation kept: a nested item is still nested
+/// when its `- ` gives way to a bullet, and its own width is the only column it gets.
+fn label_of(marker: &str) -> String {
+    let indent = &marker[..marker.len() - marker.trim_start().len()];
+    let rest = marker.trim_start();
+    match rest.chars().next() {
+        Some('-' | '+' | '*') => format!("{indent}•{}", &rest[1..]),
+        _ => marker.to_owned(),
+    }
+}
+
+/// The bytes since the previous sibling that open a block's first line: the `> ` a quote
+/// writes there, with any indentation in front of it. The cut is at the last line break, so
+/// a nested block's body is not read as part of its own prefix.
+/// Every line of `range` holding only quote markers, its line break left out: a quote's
+/// blank lines, which the parser drops, so nothing else would draw or reach their `>`.
+fn marker_lines(source: &str, range: Range<usize>) -> Vec<Range<usize>> {
+    let Some(text) = source.get(range.clone()) else {
+        return Vec::new();
+    };
+    let mut lines = Vec::new();
+    let mut start = 0;
+    for (index, byte) in text.bytes().enumerate() {
+        if byte != b'\n' {
+            continue;
+        }
+        if is_marker_only(&text[start..index]) {
+            let from = range.start + start;
+            lines.push(from..from + index - start);
+        }
+        start = index + 1;
+    }
+    if start < text.len() && is_marker_only(&text[start..]) {
+        let from = range.start + start;
+        lines.push(from..range.end);
+    }
+    lines
+}
+
+/// Whether a line without its break is nothing but quote markers and the spaces between.
+fn is_marker_only(line: &str) -> bool {
+    !line.trim().is_empty() && line.trim_end().chars().all(|c| c == '>' || c == ' ')
+}
+
+fn quote_prefix(source: &str, since: Range<usize>) -> Option<Range<usize>> {
+    let text = source.get(since.clone())?;
+    let start = since.start + text.rfind('\n').map_or(0, |at| at + 1);
+    (start < since.end).then_some(start..since.end)
+}
+
+/// The last line of `range` when it holds only quote markers, and where its content starts.
+///
+/// A line break inside a quote writes such a line; no child block covers it, so without a
+/// row of its own neither the marker nor the caret after it could be drawn.
+fn quote_tail(source: &str, range: Range<usize>) -> Option<(Range<usize>, usize)> {
+    let text = source.get(range.clone())?;
+    let body = text.strip_suffix('\n').unwrap_or(text);
+    let start = body.rfind('\n').map_or(0, |at| at + 1);
+    let line = &body[start..];
+    is_marker_only(line).then(|| {
+        let at = range.start + start;
+        (at..at + line.len(), at + line.len())
+    })
+}
+
+/// Let the view that starts where this one ends draw the caret there. A marker's last
+/// offset is the first offset of the text beside it, and a second caret would sit a hung
+/// space to the left of the one the user already sees.
+fn drop_shared_caret(decl: &mut Decl, end: usize) {
+    let NodeData::Text { caret, .. } = &mut decl.data else {
+        return;
+    };
+    if caret.as_ref().is_some_and(|caret| caret.offset == end) {
+        *caret = None;
+    }
+}
+
+/// Insert composed text at `at` without moving any byte: the runs before and after keep
+/// their offsets, and the composed run takes the place the caret had.
+fn splice(runs: Vec<TextRun>, at: usize, text: &str, style: TextStyle) -> Vec<TextRun> {
+    let mut out = Vec::with_capacity(runs.len() + 1);
+    let mut cut = 0usize;
+    let mut inserted = false;
+    for run in runs {
+        let end = cut + run.text.len();
+        if !inserted && at <= cut {
+            out.push(TextRun::new(text, style).underlined());
+            inserted = true;
+        }
+        if !inserted && cut < at && at < end && run.text.is_char_boundary(at - cut) {
+            let mut head = run;
+            let tail_text = head.text.split_off(at - cut);
+            let mut tail = head.clone();
+            tail.text = tail_text;
+            out.push(head);
+            out.push(TextRun::new(text, style).underlined());
+            out.push(tail);
+            inserted = true;
+        } else {
+            out.push(run);
+        }
+        cut = end;
+    }
+    if !inserted {
+        out.push(TextRun::new(text, style).underlined());
+    }
+    out
+}
+
+impl crate::Widget for Markdown<'_> {
+    fn decl(&self, cx: &crate::Cx<'_, '_>) -> Decl {
+        self.resolve_in(cx)
+    }
+}

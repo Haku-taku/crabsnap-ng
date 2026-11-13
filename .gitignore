@@ -1,0 +1,9 @@
+# Cargo build output
+target/
+
+# Generated mdBook HTML
+docs/book/
+
+# Local agent and editor state
+.claude/
+.zed/

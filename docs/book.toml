@@ -1,0 +1,8 @@
+[book]
+authors = ["crabsnap-ng contributors"]
+language = "en"
+src = "src"
+title = "crabsnap-ng"
+
+[build]
+create-missing = false

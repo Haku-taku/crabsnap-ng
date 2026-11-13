@@ -1,0 +1,3 @@
+# The toolchain every build is expected to use; a system cargo without rustup ignores it.
+[toolchain]
+channel = "1.99"

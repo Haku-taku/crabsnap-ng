@@ -1,0 +1,342 @@
+{
+ "$source": {
+  "md3Shape": {
+   "url": "https://m3.material.io/styles/shape/corner-radius-scale",
+   "verified": "2026-10-28",
+   "note": "ten-step scale, rounded|cut families"
+  },
+  "md3Spacing": {
+   "url": "https://m3.material.io/styles/spacing/overview",
+   "verified": "2026-10-28",
+   "note": "8dp base, space100 = 8dp; nested 2/4/6/10dp; per-item table unavailable, modelled as base x multiple"
+  },
+  "md3Motion": {
+   "note": "easing/duration tables not published (managed endpoint unavailable); numbers from Flutter Curves"
+  },
+  "md3Typography": {
+   "note": "M3 2021 type scale; tokens not machine-readable from the docs endpoint"
+  }
+ },
+ "shape": {
+  "cornerScale": [
+   {
+    "name": "none",
+    "dp": 0
+   },
+   {
+    "name": "extraSmall",
+    "dp": 4
+   },
+   {
+    "name": "small",
+    "dp": 8
+   },
+   {
+    "name": "medium",
+    "dp": 12
+   },
+   {
+    "name": "large",
+    "dp": 16
+   },
+   {
+    "name": "largeIncreased",
+    "dp": 20
+   },
+   {
+    "name": "extraLarge",
+    "dp": 28
+   },
+   {
+    "name": "extraLargeIncreased",
+    "dp": 32
+   },
+   {
+    "name": "extraExtraLarge",
+    "dp": 48
+   },
+   {
+    "name": "full",
+    "dp": -1
+   }
+  ],
+  "families": [
+   "rounded",
+   "cut"
+  ],
+  "opticalNesting": "outer - padding = inner"
+ },
+ "spacing": {
+  "baseDp": 8,
+  "tokens": [
+   {
+    "name": "space50",
+    "multiple": 0.5
+   },
+   {
+    "name": "space100",
+    "multiple": 1
+   },
+   {
+    "name": "space150",
+    "multiple": 1.5
+   },
+   {
+    "name": "space200",
+    "multiple": 2
+   },
+   {
+    "name": "space300",
+    "multiple": 3
+   },
+   {
+    "name": "space400",
+    "multiple": 4
+   },
+   {
+    "name": "space500",
+    "multiple": 5
+   },
+   {
+    "name": "space600",
+    "multiple": 6
+   },
+   {
+    "name": "space800",
+    "multiple": 8
+   },
+   {
+    "name": "space1000",
+    "multiple": 10
+   },
+   {
+    "name": "space1200",
+    "multiple": 12
+   }
+  ],
+  "nested": [
+   2,
+   4,
+   6,
+   10
+  ]
+ },
+ "typography": {
+  "note": "M3 2021 type scale (typography.dart), sizes in sp",
+  "styles": [
+   {
+    "name": "displayLarge",
+    "size": 57,
+    "lineHeight": 64,
+    "weight": 400
+   },
+   {
+    "name": "displayMedium",
+    "size": 45,
+    "lineHeight": 52,
+    "weight": 400
+   },
+   {
+    "name": "displaySmall",
+    "size": 36,
+    "lineHeight": 44,
+    "weight": 400
+   },
+   {
+    "name": "headlineLarge",
+    "size": 32,
+    "lineHeight": 40,
+    "weight": 400
+   },
+   {
+    "name": "headlineMedium",
+    "size": 28,
+    "lineHeight": 36,
+    "weight": 400
+   },
+   {
+    "name": "headlineSmall",
+    "size": 24,
+    "lineHeight": 32,
+    "weight": 400
+   },
+   {
+    "name": "titleLarge",
+    "size": 22,
+    "lineHeight": 28,
+    "weight": 400
+   },
+   {
+    "name": "titleMedium",
+    "size": 16,
+    "lineHeight": 24,
+    "weight": 500
+   },
+   {
+    "name": "titleSmall",
+    "size": 14,
+    "lineHeight": 20,
+    "weight": 500
+   },
+   {
+    "name": "bodyLarge",
+    "size": 16,
+    "lineHeight": 24,
+    "weight": 400
+   },
+   {
+    "name": "bodyMedium",
+    "size": 14,
+    "lineHeight": 20,
+    "weight": 400
+   },
+   {
+    "name": "bodySmall",
+    "size": 12,
+    "lineHeight": 16,
+    "weight": 400
+   },
+   {
+    "name": "labelLarge",
+    "size": 14,
+    "lineHeight": 20,
+    "weight": 500
+   },
+   {
+    "name": "labelMedium",
+    "size": 12,
+    "lineHeight": 16,
+    "weight": 500
+   },
+   {
+    "name": "labelSmall",
+    "size": 11,
+    "lineHeight": 16,
+    "weight": 500
+   }
+  ]
+ },
+ "motion": {
+  "note": "from Flutter Curves; md3.material.io motion token tables unavailable. The full two-part emphasized curve (Flutter easeInOutCubicEmphasized) has no single-cubic form and lives in ui_style::motion::EMPHASIZED, not in this table.",
+  "durations": [
+   {
+    "name": "short1",
+    "ms": 50
+   },
+   {
+    "name": "short2",
+    "ms": 100
+   },
+   {
+    "name": "short3",
+    "ms": 150
+   },
+   {
+    "name": "short4",
+    "ms": 200
+   },
+   {
+    "name": "medium1",
+    "ms": 250
+   },
+   {
+    "name": "medium2",
+    "ms": 300
+   },
+   {
+    "name": "medium3",
+    "ms": 350
+   },
+   {
+    "name": "medium4",
+    "ms": 400
+   },
+   {
+    "name": "long1",
+    "ms": 450
+   },
+   {
+    "name": "long2",
+    "ms": 500
+   },
+   {
+    "name": "long3",
+    "ms": 550
+   },
+   {
+    "name": "long4",
+    "ms": 600
+   }
+  ],
+  "curves": [
+   {
+    "name": "emphasizedDecelerate",
+    "cubic": [
+     0.05,
+     0.7,
+     0.1,
+     1.0
+    ]
+   },
+   {
+    "name": "emphasizedAccelerate",
+    "cubic": [
+     0.3,
+     0.0,
+     0.8,
+     0.15
+    ]
+   },
+   {
+    "name": "standard",
+    "cubic": [
+     0.2,
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   {
+    "name": "standardDecelerate",
+    "cubic": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ]
+   },
+   {
+    "name": "standardAccelerate",
+    "cubic": [
+     0.3,
+     0.0,
+     1.0,
+     1.0
+    ]
+   },
+   {
+    "name": "fastOutSlowIn",
+    "cubic": [
+     0.4,
+     0.0,
+     0.2,
+     1.0
+    ]
+   },
+   {
+    "name": "easeOutBack",
+    "cubic": [
+     0.175,
+     0.885,
+     0.32,
+     1.275
+    ]
+   }
+  ]
+ },
+ "hitTarget": {
+  "min": 48,
+  "default": 48,
+  "note": "M3 touch target 48dp"
+ }
+}
