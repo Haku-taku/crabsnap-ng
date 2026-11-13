@@ -126,12 +126,15 @@ only such surface in the app.
 | `exclusive: Reserve` | Ignored. Reserving desktop work area is an AppBar, which changes the shell's layout and is out of scope |
 | `keyboard: None` | `WS_EX_NOACTIVATE`; the surface never takes focus |
 | `keyboard: OnDemand` | No `WS_EX_NOACTIVATE`; `WM_MOUSEACTIVATE` returns `MA_ACTIVATE` inside a consumed area and `MA_NOACTIVATE` elsewhere, so a click on a pin focuses the canvas and a click on the desktop does not |
-| `keyboard: Exclusive` | Foreground on map. The hotkey press usually satisfies the foreground rules; when it does not, the overlay falls back to a low-level keyboard hook for the keys it owns |
-| `keyboard: FollowPointer` | Partial. `WM_MOUSEACTIVATE` returns `MA_ACTIVATE` over an area the surface consumes, and the previous foreground window is restored when the pointer leaves. Windows has no "focus follows pointer" contract; this is an approximation to verify |
+| `keyboard: Exclusive` | `SetForegroundWindow` on map, and `WM_MOUSEACTIVATE` answers `MA_ACTIVATE`. The hotkey press usually satisfies the foreground rules; a refusal leaves the surface unactivated until it is clicked. A low-level keyboard hook for the keys it owns is not implemented |
+| `keyboard: FollowPointer` | Degrades to `OnDemand`: `WM_MOUSEACTIVATE` returns `MA_ACTIVATE` over an area the surface consumes. Windows has no "focus follows pointer" contract, so the previous foreground window cannot be restored when the pointer leaves without a click |
 
-`SurfaceKind::LayerSurface` still drives the input region: the engine publishes
-the hit index through `set_input_region`, and the backend answers
-`WM_NCHITTEST`.
+`SurfaceRole::Layer` drives the input region: the engine publishes the hit index
+through `set_input_region`, and the backend answers `WM_NCHITTEST` with `HTCLIENT`
+inside one of those areas and `HTTRANSPARENT` outside, so the rest of a full-screen
+overlay passes the pointer to whatever is beneath it. `examples/layers.rs` checks
+this with `WindowFromPoint` over a window of the same process sitting below the
+layer.
 
 ## The frame loop on Win32
 
@@ -766,7 +769,8 @@ flaky test.
 | --- | --- |
 | Win32 backend, D3D11 presenter | Done: window, input, DPI, clipboard text, theme, `HostSession` trait, and the process `Backend` (one pump, several windows, outputs, languages, waker); see `docs/src/rendering-backends.md` |
 | D3D11 renderer | Done |
-| Transparent surfaces and input regions | Planned; `HTTRANSPARENT` across processes is unverified |
+| Layer surfaces | Approximated: a `WS_POPUP` tool window on the primary monitor, topmost for `Overlay`/`Top`, placed by anchor, size and margin arithmetic, `WS_EX_NOACTIVATE` for `KeyboardMode::None`, and click-through outside the published input region; `Bottom`/`Background` are not topmost, `Reserve` is ignored, and `FollowPointer` is click-to-focus |
+| Transparent surfaces and input regions | Done for a layer: `HTTRANSPARENT` is verified with `WindowFromPoint` landing on the window below. A translucent capture window is still planned |
 | Clipboard, drag-and-drop, hotkeys | Clipboard text and hotkeys done, the latter through `RegisterHotKey` against a message-only window; drag-and-drop planned |
 | Named-pipe IPC | Server done: message mode verified by `host_services`, where a client connects, sends one message and reads the answer; a worker's deferred reply is implemented but unexercised |
 | Capture via WGC and Desktop Duplication | Planned; the HDR path and the border behaviour are unverified |
@@ -777,9 +781,11 @@ flaky test.
 
 The `[to verify]` markers above are the items that need a spike before they
 become commitments: cross-process hit testing through a composition window, the
-colour space WGC actually delivers on an HDR display, the focus-return path for
-`FollowPointer`, and whether Desktop Duplication can coexist with the system's
-own capture tools on the target machines.
+colour space WGC actually delivers on an HDR display, and whether Desktop
+Duplication can coexist with the system's own capture tools on the target
+machines. The focus-return path for `FollowPointer` is settled: the contract
+degrades to click-to-focus, because no unrequested foreground change survives
+the shell's rules.
 
 ## Documentation gaps this port exposes
 
@@ -797,8 +803,9 @@ here because the port is where they stop being harmless.
   implemented.
 - `window.md` says a platform without layer surfaces approximates the role with
   `WS_EX_TOPMOST` and `WS_EX_TOOLWINDOW` and ignores `keyboard`. The real
-  approximation also covers activation, focus return, and per-area hit testing,
-  and `keyboard` is implementable in part.
+  approximation also covers placement from anchor, size and margin, activation,
+  and per-area hit testing; only `keyboard: FollowPointer` has no counterpart,
+  and it degrades to click-to-focus.
 - `fonts.md` says font matching on Windows is not implemented. The dependency
   comment on fontique says Windows uses DirectWrite, so a Windows font source
   exists; the gap is which face `SystemUi` resolves to and what the default
@@ -807,7 +814,8 @@ here because the port is where they stop being harmless.
   transport; the page should link here instead of restating the gap.
 
 The Status section on `rendering-backends.md` now names the Win32 window, the
-D3D11 device and the process `Backend` as implemented; Vulkan is still absent.
+D3D11 device, the process `Backend` and the layer approximation as implemented;
+Vulkan is still absent.
 
 ## See also
 

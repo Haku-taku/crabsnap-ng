@@ -74,11 +74,12 @@ stack level of its own. The vocabulary is `zwlr_layer_shell_v1`'s, which is also
 zone and a keyboard mode.
 
 Only Wayland has the role as a protocol; a platform without layer surfaces takes the same spec
-and approximates it — an undecorated window kept at the level the spec names (`WS_EX_TOPMOST`
-plus `WS_EX_TOOLWINDOW` on Windows, `NSWindow.level` on macOS, the equivalent of winit's
-`WindowLevel` on X11) — so `exclusive` and `keyboard` have no counterpart there and are ignored
-or folded into "does not activate" window styles. That mapping is written on the types
-themselves; the engine never branches on it.
+and approximates it — an undecorated window placed from `anchor`, `size` and `margin`, kept at
+the level the spec names, with `keyboard` folded into activation rules (`WS_EX_TOPMOST`,
+`WS_EX_TOOLWINDOW`, `WS_EX_NOACTIVATE` and `WM_MOUSEACTIVATE` on Windows; `NSWindow.level` on
+macOS; the equivalent of winit's `WindowLevel` on X11). `exclusive` has no counterpart
+anywhere, and a keyboard mode that platform cannot express degrades to the closest one it can.
+That mapping is written on the types themselves; the engine never branches on it.
 
 The engine's own place in this is narrow: it hands the spec to the backend and receives a
 `PresentTarget`. Whether a surface is a layer is visible to the frame contract as
@@ -306,10 +307,13 @@ Implemented: toplevel and layer-shell surfaces, shm and dma-buf presentation,
 explicit sync when the compositor offers it, configure-driven resize,
 fractional scaling, keyboard and IME through Wayland protocols, colour
 management where available, and lending the connection to application
-protocols through `WaylandLink`.
+protocols through `WaylandLink`. On Windows, a decorated window and an
+approximated layer (topmost popup, click-through outside the frame's input
+region) are behind the same spec; see
+[Rendering Backends](../rendering-backends.md).
 
-Not implemented: Windows, macOS and X11 windows; multi-seat input; tablet
-and touch protocols beyond the pointer path.
+Not implemented: macOS and X11 windows; multi-seat input; tablet and touch
+protocols beyond the pointer path.
 
 ## See also
 

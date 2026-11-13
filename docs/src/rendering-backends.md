@@ -208,8 +208,31 @@ ends; DWM stretches the last frame across the growing window, and the first
 crisp frame is built when the button comes up. A re-entrant draw or a non-modal
 sizing path is what would lift that, and neither is implemented.
 
-Not implemented on this path: IME composition, non-text clipboard formats,
-layer surfaces, which `Win32Window::new` refuses with `UnsupportedRole`, and HDR.
+A layer surface opens as a `WS_POPUP` window with `WS_EX_TOOLWINDOW`, so it stays
+out of Alt+Tab and the taskbar. `Overlay` and `Top` add `WS_EX_TOPMOST`; `Bottom`
+and `Background` open as ordinary windows, since Win32 has no supported way to sit
+beneath another application. The rectangle comes from the spec: an anchored edge
+pins that side, opposite edges together stretch the surface, `margin` is the inset
+(and with a single edge the position), and `size` is honoured only where the
+anchors leave room. `KeyboardMode::None` adds `WS_EX_NOACTIVATE`, `Exclusive` calls
+`SetForegroundWindow` once the popup is shown, and `OnDemand` activates through
+`WM_MOUSEACTIVATE` only when the click lands on an area the surface consumes.
+`FollowPointer` is the same rule: Windows has no focus-follows-pointer contract, so
+the keyboard follows a click and not the pointer. `ExclusiveZone::Reserve` is
+ignored, and every layer lands on the primary monitor: the portable spec names no
+output.
+
+The engine publishes the frame's consumed areas through `set_input_region`, and a
+layer answers `WM_NCHITTEST` with `HTCLIENT` inside one of them and
+`HTTRANSPARENT` outside, which is what lets a full-screen overlay pass the pointer
+to whatever is beneath it. Measured with
+`cargo run -p ui-platform-win32 --example layers`: on a 1.25-scale monitor a
+320x180 layer with a 40,24 margin landed 400x225 at (50, 30), `WindowFromPoint`
+returned the layer over its one published patch and the window beneath it
+everywhere else in the layer's rectangle, and an all-edge anchor covered the
+monitor exactly.
+
+Not implemented on this path: IME composition, non-text clipboard formats, and HDR.
 
 ### Invariants
 
@@ -557,6 +580,21 @@ with its own event, so a read and a write can be in flight together. Caught by
 `host_services`, which sends a message from a client thread and requires the
 answer back by the time the run ends.
 
+**Windows cannot hand the keyboard back to the pointer.** The port plan gave
+`keyboard: FollowPointer` a `WM_MOUSEACTIVATE` answer over consumed areas plus
+a restore of the previous foreground window on `WM_MOUSELEAVE`. The restore
+cannot work: the shell lets a process change the foreground only while it holds
+it or right after a click of its own, so the call on leave is silently refused,
+and calling it on every mouse move would fight the user across applications.
+`FollowPointer` therefore degrades to the `OnDemand` rule, a click on a consumed
+area focuses the surface, which the portable contract already allows a field to
+do. Caught by `examples/layers.rs`, which asserts the `MA_ACTIVATE` and
+`MA_NOACTIVATE` answers for each mode; "type where the pointer is" stays
+Wayland-only. The same probe pins the placement arithmetic (a 320x180 layer with
+a 40,24 margin at (50, 30) on a 1.25-scale monitor) and the input region
+(`WindowFromPoint` returns the layer over its published patch and the window
+below it elsewhere).
+
 ## Status
 
 Implemented: both presenters, dma-buf zero-copy, explicit sync, HDR targets,
@@ -570,12 +608,15 @@ built and exercised on this machine, the Wayland one is checked by reading each
 delegated signature until it is next built on Linux. The Win32 backend also
 implements the process `Backend`, so a `Host` on Windows runs several windows
 from one message pump, answers outputs, languages and the system clipboard, and
-serves a named-pipe channel and global hotkeys.
+serves a named-pipe channel and global hotkeys. A layer surface opens as a
+topmost, non-activating popup on the primary monitor, placed by the spec's
+anchors, size and margins, and click-through outside the areas its frame
+publishes.
 
 Not implemented: on the Windows process loop, a selection reader; on the
-Windows window, IME, non-text clipboard formats, layer surfaces and HDR, and
-redraw during a modal resize drag; Vulkan. The Windows and Vulkan notes in
-`old/` are surveys, not code.
+Windows window, IME, non-text clipboard formats and HDR, and redraw during a
+modal resize drag; Vulkan. The Windows and Vulkan notes in `old/` are surveys,
+not code.
 
 ## See also
 
