@@ -386,6 +386,10 @@ staging readback, so both rungs hand back the same `ScreenFrame`. Opening one in
 release on this machine: 153 ms for the process's first D3D11 device, 59 ms for
 the item, pool and session, and 11 ms more until the first frame is read.
 
+A session is also closed, not merely released: Windows holds its frames, its
+plumbing and the device behind its pool until `Close()`, and one grab is one
+session. `Drop for GraphicsCapture` closes the session, then the pool.
+
 ## CPU path
 
 `ui-paint` uses zeno for coverage and reads the same glyph atlas. It repaints
@@ -903,6 +907,24 @@ be brought up for as long as one is on screen would be the worse bargain. Caught
 by the overlay's own window: `EnumWindows` and `GetWindowRect` report 0,0
 2560x1440, and `examples/layers.rs` now opens a `Cover` layer and requires the
 monitor rect; that check printed OK on this machine.
+
+**Every screenshot left its capture session behind.** `GraphicsCapture` dropped
+its pool, session and item the way one drops a DXGI object, and a WinRT capture
+session keeps the compositor's frames, its share of the desktop's capture
+plumbing and the device behind the pool alive until `Close()` is called. Because
+the daemon opens one rung per shot, each region capture after the first cost
+about 33 MB of working set and 152 handles: a probe that opened, grabbed and
+dropped five sessions in one process climbed 133 to 1075 handles, 153 per
+session, while the daemon itself read 146 MB before the first shot and 180, 213,
+246 MB after the next three. `Drop for GraphicsCapture` now closes the session
+and then the pool, which is the root fix rather than a cap on the leak: the
+session is per grab by design, since a pool only hands over a frame when the
+desktop changes. Caught by the same probe, since removed — 30 sessions hold one
+working set of about 31 MB and end 3 handles apiece above the start, and the
+duplication rung leaves the same residue, so those belong to the per-grab D3D11
+device and not to the session. Nothing in the suite pins it: a capture session
+needs a display, and the check that catches a regression is cycling sessions in
+one process and reading its handle count.
 
 ## Status
 
