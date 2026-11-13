@@ -237,7 +237,7 @@ the export design. Display always uses the destination's curve.
 | `ui-core/src/colour.rs` | transfer functions, gamut matrices, format choice, `ContentColour`, `Placement`, tone curves |
 | `ui-platform-wayland/src/window.rs` | reads output descriptions, declares the surface, builds `HdrSurface` |
 | `ui-platform-wayland/src/gpu_window.rs` | turns `SurfaceColour` into a destination, a target pool and renderer state |
-| `ui-paint-gpu/src/renderer.rs` | working domain, target formats, per-destination texture builds, present pass |
+| `ui-gpu-scene/src/renderer.rs` | working domain, target formats, per-destination texture builds, present pass |
 | `ui-paint/src/lib.rs` | the CPU painter's samples, through the same `Placement` |
 | `apps/crabsnap/src/color.rs` | reads the compositor's description into a `ContentColour` |
 | `apps/crabsnap/src/capture.rs` | keeps the native frame and its description; the SDR rendition for a file |

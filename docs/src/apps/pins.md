@@ -50,7 +50,7 @@ as UTF-8. The pin's helper follows that order.
 `smooth` and `mipmap` on the item, so the same source drawn twice can be
 filtered twice; egui's `TextureOptions::NEAREST` is chosen per texture handle.
 Our engine uploads every image with `LINEAR`
-(`ui/crates/ui-paint-gpu/src/renderer.rs`, `upload_image`), which is the
+(`ui/crates/ui-gpu-scene/src/renderer.rs`, `upload_image`), which is the
 smoothing half of what a zoomable pin needs.
 
 **A pin that is not a picture is still a preview.** macOS Quick Look renders any
@@ -818,7 +818,7 @@ The command surface follows the sources:
 | `apps/crabsnap/src/capture.rs` | `Image` as the bitmap content's source |
 | `apps/crabsnap/src/zoom.rs` | the zoom lattice: a step count to a scale, a wheel delta to steps, a content's range as step bounds |
 | `ui/crates/ui-core/src/tree.rs` | static `scale` declaration |
-| `ui/crates/ui-paint-gpu/src/renderer.rs` | per-entry sampling |
+| `ui/crates/ui-gpu-scene/src/renderer.rs` | per-entry sampling |
 | `ui/crates/ui-color-hct/src/scheme.rs` | MD3 role palettes from a seed |
 | `ui/crates/ui-color-hct/src/quantize.rs` | a picture's most populated colours (Wu) |
 | `apps/crabsnap/locales/{en,zh-CN}/crabsnap.ftl` | menu rows and every error |

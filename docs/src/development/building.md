@@ -41,7 +41,7 @@ debug-assertions = true
 | --- | --- | --- |
 | `ui-text-fontique/system` | The OS font stack (fontconfig, DirectWrite, CoreText) | Any test or example that shapes real text |
 | `ui-platform-wayland/system-fonts` | The same, through the Wayland backend | Examples that draw text in a window |
-| `ui-platform-wayland/gpu` | `ui-paint-gpu` and the EGL/dma-buf presenter | The GPU path; off for CPU-only work |
+| `ui-platform-wayland/gpu` | `ui-paint-gpu` (the GL device), `ui-gpu-egl` and the dma-buf presenter | The GPU path; off for CPU-only work |
 | `ui-platform/profile` | `hotpath` timing in every frame phase | Frame profiling only |
 | `ui-platform-wayland/profile` | The same in the present path, plus `ui-paint-gpu/profile` | Present-path profiling only |
 | `ui-paint-gpu/profile` | `hotpath` timing inside the renderer's passes | Reached through the wayland crate |

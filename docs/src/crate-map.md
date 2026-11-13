@@ -24,14 +24,15 @@ contract to the lowest crate that can express it.
 | `ui-widgets-md3` | The MD3 control set | one module per control, plus `spec/` and `tests/` | Platform crates |
 | `ui-widgets-fluent` | The Fluent (WinUI 3) control set | `button`, `checkbox`, `math`, `radio`, `slider`, `textbox`, `toggle`, `progress`, `tab_view`, `infobar`, `tooltip`, `dialog` | Platform crates |
 | `ui-widgets-glass` | The Liquid Glass control set | `card`, `dialog`, `math`, `popover`, `overlay`, `morph`, `search_bar`, `action_sheet`, `modal_sheet`, `stepper` | Platform crates |
+| `ui-gpu-scene` | The backend-neutral GPU paint scene: batch walking, the layer stack, damage bands, backdrop ordering, the pass sequence | `device`, `renderer`, `program`, `effect`, `target`, `format`, `layout` | Platform crates; name a graphics API |
 | `ui-gallery` | No library: the `gallery` and `list_bench` examples and their pages | `examples/gallery/` | Be depended on by anything |
 
 ## Platform-bound
 
 | Crate | Owns | May not |
 | --- | --- | --- |
-| `ui-gpu-egl` | EGL display and context, GBM buffers, dma-buf export, explicit sync | Be a dependency of a portable crate |
-| `ui-paint-gpu` | The GPU paint backend: GLES resources and shaders into a dma-buf target | Be a dependency of a portable crate |
+| `ui-gpu-egl` | EGL display and context, GBM buffers, dma-buf export, explicit sync, the render node to use | Be a dependency of a portable crate |
+| `ui-paint-gpu` | The GL device the scene draws through: shaders, vertex arrays, texture storage, framebuffers | Be a dependency of a portable crate |
 | `ui-platform-wayland` | The Wayland XDG target: protocol glue, `wl_shm` buffers, input, clipboard, presenting | Be a dependency of a portable crate |
 | `ui-demo` | Shared showcase bootstrap for the demo binaries: window, presenter, bundled faces, loop | Be a dependency of a portable crate |
 
@@ -41,7 +42,9 @@ Read each line as "depends on". There are no other internal edges.
 
 | Crate | Internal dependencies |
 | --- | --- |
-| `ui-core`, `ui-color-hct`, `ui-highlight`, `ui-i18n`, `ui-gpu-egl` | None |
+| `ui-core`, `ui-color-hct`, `ui-highlight`, `ui-i18n` | None |
+| `ui-gpu-scene` | `ui-core` |
+| `ui-gpu-egl` | `ui-gpu-scene` |
 | `ui-richtext` | `ui-core`, `pulldown-cmark` |
 | `ui-math` | `ui-core`, `math-core`, `math-syntax`, `math-font`, `math-editor` |
 | `ui-text` | `ui-core` |
@@ -49,8 +52,8 @@ Read each line as "depends on". There are no other internal edges.
 | `ui-paint` | `ui-core` |
 | `ui-design` | `ui-core`, `ui-color-hct` |
 | `ui-platform` | `ui-core`, `ui-paint`, `ui-text`, `ui-text-fontique`, `ui-math` |
-| `ui-paint-gpu` | `ui-core`, `ui-gpu-egl` |
-| `ui-platform-wayland` | `ui-core`, `ui-paint`, `ui-platform`, `ui-text`, `ui-text-fontique`, and `ui-paint-gpu` under `gpu` |
+| `ui-paint-gpu` | `ui-core`, `ui-gpu-scene` |
+| `ui-platform-wayland` | `ui-core`, `ui-paint`, `ui-platform`, `ui-text`, `ui-text-fontique`, and `ui-paint-gpu` with `ui-gpu-egl` under `gpu` |
 | `ui-style` | `ui-core`, `ui-design` |
 | `ui-widgets` | `ui-core`, `ui-design`, `ui-style`, `ui-platform`, `ui-i18n` |
 | `ui-widgets-md3` | `ui-core`, `ui-design`, `ui-style`, `ui-widgets`, `ui-i18n` |

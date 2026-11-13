@@ -8,19 +8,18 @@ add a backend, and where the test does not look.
 
 `crates/ui-platform/tests/platform_boundary.rs` holds them.
 
-`PLATFORM_BOUND` — four crates, each with a written reason:
+`PLATFORM_BOUND` — three crates, each with a written reason:
 
 | Crate | Reason in the test |
 | --- | --- |
 | `ui-platform-wayland` | Wayland window backend: `wayland-client`, `libc`, `xkbcommon` |
 | `ui-demo` | Showcase bootstrap: opens a Wayland window and exits the process |
 | `ui-gpu-egl` | EGL device + GBM + dma-buf: unix fds, `libc`, `libgbm` |
-| `ui-paint-gpu` | GL renderer; platform-bound only through `ui-gpu-egl` |
 
 Everything else is `PORTABLE`: `ui-core`, `ui-color-hct`, `ui-design`,
-`ui-gallery`, `ui-i18n`, `ui-paint`, `ui-platform`, `ui-style`, `ui-text`,
-`ui-text-fontique`, `ui-widgets`, `ui-widgets-md3`, `ui-widgets-fluent`,
-`ui-widgets-glass`.
+`ui-gallery`, `ui-gpu-scene`, `ui-i18n`, `ui-paint`, `ui-paint-gpu`,
+`ui-platform`, `ui-style`, `ui-text`, `ui-text-fontique`, `ui-widgets`,
+`ui-widgets-md3`, `ui-widgets-fluent`, `ui-widgets-glass`.
 
 ## What the checks scan
 
@@ -63,9 +62,10 @@ Review has to catch these. The test is a floor, not a proof.
    - `SceneTarget` for an engine-owned scene (the GPU path): `size`,
      `present_scene(&DrawList, &TextPass, &Damage)`, optionally `set_cursor`,
      `set_ime`, `commit_pending`.
-   - Reuse GL rendering by implementing `GpuSurface` (`size`, `bind`). A
-     different GPU API needs a device crate and renderer work, not just this
-     trait.
+   - Reuse the GPU painter by implementing `ui_gpu_scene::RenderTarget` (`size`,
+     `target_id`) for the target it draws into. A different graphics API needs
+     its own `ui_gpu_scene::Device` and a device crate beside `ui-paint-gpu`,
+     not just this trait.
 5. Detect capabilities at runtime and pass them down. Gate the backend with a
    Cargo feature if it has an optional dependency;
    `ui-platform-wayland/gpu` is the model.

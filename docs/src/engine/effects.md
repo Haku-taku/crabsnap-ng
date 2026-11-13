@@ -72,7 +72,7 @@ pixels. Two kinds of effect read pixels they do not own, so a change near them
 moves pixels the damage rect never named: a backdrop captures the frame around
 its box, and a layer chain reads its layer around every pixel it writes. Both
 grow the band over the whole reader (`cover_readers` in
-`crates/ui-paint-gpu/src/renderer.rs`), and a layer the band then contains is
+`crates/ui-gpu-scene/src/renderer.rs`), and a layer the band then contains is
 drawn in full, so a kernel never reads a hole a cull left in its layer.
 
 The growth is the whole reader, not the reach around the damage. Grow-by-reach
@@ -114,7 +114,7 @@ A layer declared `offscreen`, or one whose chain has a kernel and whose bounds
 cover at least `EFFECT_CACHE_MIN_SHARE` (a quarter) of the frame, keeps a
 target under the node's id, and the renderer reuses it while the frame's damage
 stays clear of the layer's device bounds (`cached_is_clean` in
-`crates/ui-paint-gpu/src/renderer.rs`). The share is a cost rule, not a
+`crates/ui-gpu-scene/src/renderer.rs`). The share is a cost rule, not a
 correctness one: a cached layer pays a full-frame clear and copy on every frame
 it changes, while a kernel pass pays about its own area times the taps, so a
 press glare of a few thousand pixels is cheaper to blur again than to store,
@@ -182,7 +182,7 @@ redrew the whole surface — composited those holes back onto the screen. Batche
 inside a layer that carries a cache key now skip both the cull and the band
 scissor, so what is stored is the layer in full, as Flutter re-records an
 invalidated `RepaintBoundary`. Caught by `a_cached_layer_is_redrawn_whole` in
-`crates/ui-paint-gpu/src/renderer.rs`; no built-in control uses
+`crates/ui-gpu-scene/src/renderer.rs`; no built-in control uses
 `Decl::offscreen`, so the public API was the only way to reach it.
 
 **A cached layer never saw damage that landed inside it on a scaled window.**

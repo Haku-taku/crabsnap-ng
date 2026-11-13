@@ -14,8 +14,11 @@ scans out directly.
 
 ## GPU path
 
-`ui-gpu-egl` owns the device side; `ui-paint-gpu` owns GL resources and
-shaders. The chain is:
+Three crates split the path. `ui-gpu-scene` decides what to draw — batches, the
+layer stack, damage bands, pass order — and talks to a `Device` trait, naming no
+graphics API. `ui-paint-gpu` implements that trait on GL: shaders, vertex
+arrays, texture storage, framebuffers. `ui-gpu-egl` owns the EGL context and the
+dma-buf target. The chain is:
 
 1. `gbm_bo_create(..., GBM_FORMAT_ARGB8888, GBM_BO_USE_RENDERING)`.
 2. Export fd, stride, offset, modifier; import as `EGLImage` with
@@ -273,6 +276,20 @@ the clip, harmful where the mask reflected the node's own. Caught by
 before `paint_self` (the page half a pixel outside the box read 255 instead of
 153); `a_rounded_parent_clips_its_child_to_the_curve` pins the child side. Press
 ink, the scrollbar and the focus adorner still paint inside the clip.
+
+**The CPU path cannot be the reference for a second backend.** The Windows port
+began from the assumption that `ui-paint`'s output defines correct pixels. It
+does not: the CPU path skips canvas compositing, layer effects and backdrop
+materials, so a backend that agreed with it would have baked those gaps in. The
+GPU path is the reference instead, and it had to be made portable before a
+second API could implement it: the painter moved from `ui-paint-gpu` into
+`ui-gpu-scene`, which reaches the driver only through the `Device` trait, and
+`ProgramId`, `TextureId` and `TargetId` are opaque handles a backend decodes its
+own way. `ui-paint-gpu` is now just the GL implementation of that trait.
+Verified as far as this machine allows: `ui-gpu-scene` builds on its own and its
+unit tests pass, which covers the batch and scissor geometry and not the device.
+The GL backend, the Wayland wiring and every example still need a Linux run
+before this paragraph can claim more.
 
 ## Status
 

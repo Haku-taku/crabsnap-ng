@@ -126,7 +126,7 @@ directly, so no frame-sized copy is made.
 | `crates/ui-platform/src/view.rs` | version cache, text resolution, CPU painting, damage hashing |
 | `crates/ui-platform/src/present.rs` | `CanvasFrame`, the per-frame contract with a presenter |
 | `crates/ui-paint/src/lib.rs` | `encode_rgba_straight`, sampling a canvas entry |
-| `crates/ui-paint-gpu/src/renderer.rs` | one target per canvas, painted at scale 1 before the frame |
+| `crates/ui-gpu-scene/src/renderer.rs` | one target per canvas, painted at scale 1 before the frame |
 | `crates/ui-platform-wayland/src/session.rs` | maps the engine's canvases to the presenter's uploads |
 
 ## Corrections

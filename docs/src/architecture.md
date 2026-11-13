@@ -12,7 +12,7 @@ table is in [Crate Map](./crate-map.md).
 | Tier | Crates | Knows about |
 | --- | --- | --- |
 | Vocabulary | `ui-core`, `ui-color-hct`, `ui-i18n`, `ui-text` | Types and contracts; no I/O |
-| Paint | `ui-paint`, `ui-paint-gpu`, `ui-gpu-egl` | Primitives to pixels |
+| Paint | `ui-paint`, `ui-gpu-scene`, `ui-paint-gpu`, `ui-gpu-egl` | Primitives to pixels |
 | Platform and engine | `ui-platform`, `ui-platform-wayland` | Windows, surfaces, the frame loop |
 | Design system | `ui-design`, `ui-style` | Colour roles, materials, motion, capabilities |
 | Controls | `ui-widgets`, `ui-widgets-md3`, `ui-widgets-fluent`, `ui-widgets-glass` | Declarations built from the layers below |
@@ -37,8 +37,9 @@ The scan strips `//` comments before looking, so a banned token in a comment is
 not a violation. Dev-dependencies are exempt, which is why `ui-gallery` can be
 portable while its examples use the Wayland backend.
 
-`PLATFORM_BOUND` today: `ui-gpu-egl`, `ui-paint-gpu`,
-`ui-platform-wayland`, `ui-demo`. Everything else is `PORTABLE`.
+`PLATFORM_BOUND` today: `ui-gpu-egl`, `ui-platform-wayland`, `ui-demo`.
+Everything else is `PORTABLE`, including the painter: `ui-gpu-scene` decides what
+to draw and `ui-paint-gpu` is its GL device, both free of OS APIs.
 
 ## Conventions that no test enforces
 
@@ -60,10 +61,10 @@ These are real rules, enforced by review rather than by cargo:
 
 ## Backends
 
-- **Presentation** has a CPU path (`ui-paint`) and a GPU path (`ui-paint-gpu`
-  through `ui-gpu-egl`). The Wayland backend selects the GPU path with its
-  `gpu` feature; without it, it presents through shared memory. See
-  [Rendering Backends](./rendering-backends.md).
+- **Presentation** has a CPU path (`ui-paint`) and a GPU path (`ui-gpu-scene`
+  driving `ui-paint-gpu`'s GL device, onto a target from `ui-gpu-egl`). The
+  Wayland backend selects the GPU path with its `gpu` feature; without it, it
+  presents through shared memory. See [Rendering Backends](./rendering-backends.md).
 - **Text** is split between the contract (`ui-text`: font stacks, shaping
   output, fallback) and a provider crate (`ui-text-fontique`). The system font
   stack is the provider's `system` feature, off by default so unit tests do not
@@ -80,7 +81,9 @@ These are real rules, enforced by review rather than by cargo:
 | --- | --- |
 | A layout, hit, event, damage, or animation contract | `ui-core` |
 | A primitive, batch, or CPU raster rule | `ui-paint` |
-| A GLSL program or GPU resource | `ui-paint-gpu` |
+| A batch walk, layer, damage band, or pass order | `ui-gpu-scene` |
+| A GLSL program or GL resource | `ui-paint-gpu` |
+| An EGL, gbm, or dma-buf detail | `ui-gpu-egl` |
 | Window, surface, frame loop, presentation target | `ui-platform` |
 | Wayland protocol or buffer handling | `ui-platform-wayland` |
 | A colour role, material, motion curve, or capability | `ui-design`, `ui-style` |

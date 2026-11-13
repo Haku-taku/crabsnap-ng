@@ -147,7 +147,7 @@ moved, damage reported nothing. The `Arc` is now the picture's identity — the
 renderer re-uploads when it changes and holds the `Arc` so its address cannot be
 reused by a later allocation, and the fingerprint hashes that address. Caught by
 `a_new_buffer_behind_a_known_id_is_uploaded_again` in
-`crates/ui-paint-gpu/src/renderer.rs` and
+`crates/ui-gpu-scene/src/renderer.rs` and
 `new_pixels_behind_a_known_image_id_damage_the_node` in
 `crates/ui-platform/src/view/tests.rs`.
 
