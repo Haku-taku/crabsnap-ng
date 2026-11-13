@@ -1,14 +1,14 @@
 //! DXGI Desktop Duplication: the composed desktop, HDR included.
 //!
-//! The engine's own duplication turns the desktop's float surface into sRGB codes against the
-//! display's SDR white, which is where an HDR frame's highlights survive. It also holds the
-//! output exclusively and reports a new frame only when the desktop changes, so one grab opens
-//! its own duplication: the frame a fresh one delivers is the desktop as it is now, measured
-//! on a static desktop at 2560x1440 in 157 ms.
+//! The engine's duplication hands over the desktop's own surface: half floats on a display
+//! Windows presents HDR on, eight-bit codes otherwise, both described and unconverted. It
+//! holds the output exclusively and reports a new frame only when the desktop changes, so one
+//! grab opens its own duplication: the frame a fresh one delivers is the desktop as it is now,
+//! measured on a static desktop at 2560x1440 in 157 ms.
 
 use std::time::Duration;
 
-use crabsnap_core::capture::{Backend, Frame, PixelFormat, Started};
+use crabsnap_core::capture::{Backend, Frame, Started};
 use ui_platform_win32::ScreenCapture;
 
 pub(crate) struct Duplication {
@@ -33,17 +33,7 @@ impl Backend for Duplication {
 
     fn grab(&mut self, timeout: Duration) -> Result<Frame, String> {
         let mut capture = ScreenCapture::open(Some(&self.device))?;
-        let frame = capture.grab(timeout)?;
-        Ok(Frame {
-            width: frame.width,
-            height: frame.height,
-            stride: frame.width * 4,
-            pixels: frame.pixels,
-            format: PixelFormat::Rgba8,
-            colour: frame.colour,
-            output: Some(frame.output),
-            scale: frame.scale,
-        })
+        Ok(super::frame_of(capture.grab(timeout)?))
     }
 
     fn begin(self: Box<Self>, _timeout: Duration) -> Result<Started, String> {

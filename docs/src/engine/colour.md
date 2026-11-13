@@ -135,7 +135,7 @@ the reason once.
 
 ```rust
 struct ContentColour {
-    storage: PixelStorage, // Sdr8(RGBA8) | Packed10(one 32-bit word)
+    storage: PixelStorage, // Sdr8(RGBA8) | Packed10(one 32-bit word) | Float16(scRGB)
     primaries: Chromaticities,
     transfer: TransferFunction,
     max_nits: f32, // zero when nobody stated one
@@ -151,6 +151,12 @@ There is no white level in the type. PQ codes are absolute in nits; the sRGB
 and gamma codes of SDR content mean "the desktop's white", and the
 destination is that same desktop, so the destination's reference is the only
 anchor either direction needs.
+
+`Float16` is the one storage that is already in light: scRGB half floats, where
+1.0 is `SCRGB_WHITE_NITS` (80 nits) and a highlight above white is simply a
+value above 1.0. Both are absolute, so the packing itself carries the anchor
+and no field is needed. A float texel skips the transfer decode — `decode`
+clamps at 1.0, which is precisely the light such a frame exists to keep.
 
 `ContentColour::placement(destination)` derives the transform once per
 texture: a gamut matrix to the working domain's sRGB primaries with Bradford
@@ -260,7 +266,10 @@ A grab of the screen keeps the pixels and description the compositor delivered:
 a `Xbgr2101010` frame stays a buffer of 10-bit words, with `X`'s undefined
 alpha bits made opaque, which is a repack and not a colour operation. Its SDR
 rendition is produced when a file asks for one (`Cropped::rendition`) and
-never replaces the original.
+never replaces the original. An advanced-colour desktop arrives as scRGB half
+floats instead, eight bytes a texel, and travels the same way: the bytes are
+copied row by row and the description says `Float16`, so the light above white
+reaches the pin and only the destination decides what to do with it.
 
 ## Traps
 
@@ -280,6 +289,8 @@ never replaces the original.
 | Convert content to the display's description when it is imported | A pin shown on an SDR output never returns to HDR when the output switches |
 | Carry a white level in `ContentColour` and scale PQ by it | Absolute luminance divided twice, so every HDR pin on an SDR surface comes out dark |
 | Read a `Xbgr2101010` word as BGRA byte order | Red and blue swap only in 10-bit content, which looks like a gamut bug |
+| Squeeze a float desktop into eight bits at ingest | Every highlight above white lands on 1.0, so the pin looks the same on an HDR surface |
+| Decode scRGB floats with the sRGB transfer | The decode clamps at 1.0 and throws away the only light the packing was for |
 | Run a tone curve when the destination's peak already covers the content | Every highlight dims a little for no reason |
 | Keep one global HDR mode, or read it from the environment | Two surfaces on different outputs cannot both be right |
 | Destroy the surface feedback after reading it | The compositor's change of mind is never heard |
@@ -382,6 +393,18 @@ accepted; NVIDIA returns a tiled modifier, so the answer was wrong for the
 pair actually used. Probe the allocated combination, and treat
 `implicit-only` as a different failure from "not advertised".
 
+**A float desktop had no storage, so it was encoded back into eight bits.** The
+Windows advanced-colour capture hands the desktop over as scRGB half floats,
+and `PixelStorage` knew only `Sdr8` and `Packed10`: ingest divided by the
+reference white and encoded, so a 2.5 value (200 nits) and an 8.0 (640 nits)
+both arrived at or above 1.0 and the pin drew the same picture on an HDR
+surface as an SDR one. The storage gained `Float16` with its own texel size
+(eight bytes), `ContentColour::scrgb` names its absolute anchor, and `texel()`
+skips the transfer decode for it — the decode clamps at 1.0, which is exactly
+the light the packing exists to keep. Caught by
+`a_float_frame_keeps_the_light_above_white` and
+`a_float_picture_keeps_its_light_above_the_reference_white`.
+
 ## Verification
 
 | Check | What it catches |
@@ -396,6 +419,8 @@ pair actually used. Probe the allocated combination, and treat
 | `only_srgb_codes_on_an_sdr_surface_are_handed_over_untouched` | the identity branch widening to content it would round trip, or vanishing |
 | `the_bt2390_curve_reaches_both_peaks_and_never_folds_back` | a curve that misses its endpoints or folds |
 | `a_ten_bit_frame_keeps_its_words_and_gains_opaque_alpha` | a 10-bit frame repacked into eight bits, or an `X` surface left transparent |
+| `a_float_frame_keeps_the_light_above_white` | a float desktop reduced to four bytes a texel at ingest |
+| `a_float_picture_keeps_its_light_above_the_reference_white` | a float texel put through the transfer decode, so 640 nits arrives as 203 |
 | `a_new_buffer_behind_a_known_id_is_uploaded_again` | a texture kept after its description or destination changed |
 | Dual-domain scene (planned) | encoded and linear domains producing different geometry or coverage |
 | Declare / unset / declare on the real compositor (run by hand, probe removed) | a second `get_surface`, or an unset that does not commit |
@@ -434,9 +459,10 @@ compiled as two shader variants. Captures read the frame before the output
 transform.
 
 `ContentColour` travels with every picture: a capture keeps its native 10-bit
-words and the compositor's description, a crop of it is a smaller copy of the
-same picture, a pin hands those bytes and that description to the surface, and
-each renderer builds a texture for its destination with `Clip` or `Bt2390`.
+words or its scRGB half floats and the compositor's description, a crop of it
+is a smaller copy of the same picture, a pin hands those bytes and that
+description to the surface, and each renderer builds a texture for its
+destination with `Clip` or `Bt2390`.
 Both painters honour it: the GPU one builds a texture per (colour, destination)
 and rebuilds when either changes, and the CPU one converts its samples the
 same way.

@@ -1,13 +1,16 @@
 //! One frame from each capture rung, so a rung that answers with nothing says so.
 //!
 //! The mean luma is the check: a blank or uninitialised frame reads 0, and the rungs must
-//! agree on the desktop they photographed. The last check is the packing: every rung's frame
-//! becomes an opaque picture, whatever its alpha byte held.
+//! agree on the desktop they photographed. Each frame is compared in the rendition a file
+//! gets, so the rungs agree whatever packing the desktop handed over, and the native storage
+//! is printed beside it.
 
 use std::time::{Duration, Instant};
 
-use crabsnap_core::capture::Frame;
+use crabsnap_core::capture::{Frame, Image, PixelFormat};
 use crabsnap_platform_win32::capture;
+use ui_core::colour::ContentColour;
+use ui_core::geom::Rect;
 
 fn main() -> Result<(), String> {
     let mut frames: Vec<(&'static str, Frame)> = Vec::new();
@@ -22,31 +25,24 @@ fn main() -> Result<(), String> {
         let started = Instant::now();
         match capture.grab(Duration::from_secs(3)) {
             Ok(frame) => {
+                let storage = frame.colour.storage;
+                let output = frame.output.clone();
+                let mut shot = rendition(&frame.into_image());
+                shot.output = output;
                 println!(
                     "{}: {}x{} stride {} scale {} output {} mean {:.1} storage {:?} after {:?}",
                     capture.name(),
-                    frame.width,
-                    frame.height,
-                    frame.stride,
-                    frame.scale,
-                    frame.output.as_deref().unwrap_or("none"),
-                    mean_luma(&frame),
-                    frame.colour.storage,
+                    shot.width,
+                    shot.height,
+                    shot.stride,
+                    shot.scale,
+                    shot.output.as_deref().unwrap_or("none"),
+                    mean_luma(&shot),
+                    storage,
                     started.elapsed()
                 );
-                let image = frame.into_image();
-                let opaque = image.data.as_chunks::<4>().0.iter().all(|t| t[3] == 0xff);
+                let opaque = shot.pixels.as_chunks::<4>().0.iter().all(|t| t[3] == 0xff);
                 println!("{}: opaque {opaque}", capture.name());
-                let shot = Frame {
-                    width: image.width,
-                    height: image.height,
-                    stride: image.width * 4,
-                    pixels: image.data.as_ref().clone(),
-                    format: crabsnap_core::capture::PixelFormat::Rgba8,
-                    colour: image.colour,
-                    output: None,
-                    scale: image.scale,
-                };
                 frames.push((capture.name(), shot));
             }
             Err(error) => println!("{rung}: {error} after {:?}", started.elapsed()),
@@ -55,8 +51,8 @@ fn main() -> Result<(), String> {
     compare(&frames);
 
     // The automatic chain must bind the first rung that answers.
-    let mut automatic = capture::open(None, 0)?
-        .ok_or_else(|| "the automatic chain bound nothing".to_string())?;
+    let mut automatic =
+        capture::open(None, 0)?.ok_or_else(|| "the automatic chain bound nothing".to_string())?;
     let frame = automatic.grab(Duration::from_secs(3))?;
     println!(
         "auto: {} at {}x{}",
@@ -65,6 +61,22 @@ fn main() -> Result<(), String> {
         frame.height
     );
     Ok(())
+}
+
+/// A picture as the SDR file this tool writes, from whatever packing the desktop handed over.
+fn rendition(image: &Image) -> Frame {
+    let whole = Rect::new(0.0, 0.0, image.width as f32, image.height as f32);
+    let pixels = image.crop(whole).rendition().into_owned();
+    Frame {
+        width: image.width,
+        height: image.height,
+        stride: image.width * 4,
+        pixels,
+        format: PixelFormat::Rgba8,
+        colour: ContentColour::SDR,
+        output: None,
+        scale: image.scale,
+    }
 }
 
 /// How far apart two rungs' pictures of the same desktop are, in 8-bit codes.

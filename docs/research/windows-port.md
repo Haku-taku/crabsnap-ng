@@ -214,13 +214,15 @@ other output keeps the 8-bit chain, and an output that refuses the PQ space
 failing `SetColorSpace1`) is dropped and replaced by the SDR one, so a machine
 with HDR switched off never sees the half-float path.
 
-`examples/hdr.rs` is the check. This machine's panel composes SDR, so what it
-pins is the fallback: eight-bit chain, all five grey codes unchanged. Aiming the
-renderer at the output's description anyway — 80 nits SDR white, 417.7 nits peak
-— put white at 0.486 against `encode_for_pq_output`'s 0.4859 and every other
-code within 0.0007, through the half-float frame and the copy into an SDR back
-buffer. The HDR chain itself is `[to verify]` on real hardware: a display in HDR
-reports colour space 12 and drives the branch this panel refuses.
+`examples/hdr.rs` is the check. When it was run this machine's panel composed
+SDR, so what it pins is the fallback: eight-bit chain, all five grey codes
+unchanged. Aiming the renderer at the output's description anyway — 80 nits SDR
+white, 417.7 nits peak — put white at 0.486 against `encode_for_pq_output`'s
+0.4859 and every other code within 0.0007, through the half-float frame and the
+copy into an SDR back buffer. The desktop on this machine now reports PQ
+composition — captures come back as half floats — so the presenter takes the
+half-float chain here, but that chain has not been re-checked since the display
+changed and stays `[to verify]`.
 
 The SDR white level is not a constant. It comes from the display configuration,
 as the Wayland path takes it from `wp_color_manager_v1`. A value copied from
@@ -664,20 +666,22 @@ creates or shares a device accordingly. Cross-adapter sharing through a shared
 NT handle and a keyed mutex is the fallback, and it costs a copy.
 
 HDR capture yields `R16G16B16A16_FLOAT` from Duplication and f16 from Graphics
-Capture. Both arrive in a linear scRGB-like space; the conversion to
-`ContentColour` and to the PNG rendition is the same code the Wayland path
-uses, with the buffer format changed.
+Capture, in scRGB: linear, 1.0 is 80 nits. Neither path converts what it reads.
+The frame carries `PixelStorage::Float16` and its peak, the pin uploads it as an
+`Rgba16F` texture, and only an SDR destination — a file's rendition — divides
+and encodes, through the same code the Wayland path uses.
 
 Both DXGI rungs are implemented in `ui-platform-win32` and hand back the same `ScreenFrame`:
-straight RGBA8, upright, with the output's name and DPI scale. `ScreenCapture` duplicates one
+straight and upright, in whatever packing the desktop composed in — RGBA8, or
+scRGB half floats at eight bytes a texel — with the output's name and DPI scale. `ScreenCapture` duplicates one
 output from a device on that output's adapter. It asks `DuplicateOutput1` for f16 first, and
 the same clipping trap applies on an auto colour managed SDR desktop as on an HDR one:
 `DuplicateOutput` alone converts the composed surface to BGRA8 and everything above roughly
 158 in sRGB lands on white. Measured here — an SDR-composed ACM panel whose white level reads
 raw 3000 (240 nits) — a chart of eight known codes read back exactly through the float path
-and came back as 59 for 32 and 210 for 128 through the 8-bit one. The float frame is divided
-by the white level and encoded to sRGB, so a screenshot holds the codes a window drew; light
-past SDR white clips until the engine carries a half-float content colour.
+and came back as 59 for 32 and 210 for 128 through the 8-bit one. The float frame is kept as
+it arrives, so a screenshot holds the light the desktop composed; only the file rendition
+divides by the white level and encodes.
 
 `GraphicsCapture` runs a capture session over the monitor instead: an item from
 `IGraphicsCaptureItemInterop::CreateForMonitor`, a free-threaded frame pool, since a caller
@@ -687,15 +691,16 @@ otherwise, and a null `TryGetNextFrame` — which windows-rs reports as an error
 — is the "nothing yet" answer, not a failure. A fresh session hands over the current desktop
 on a still screen, so one session per grab is enough. The border and pointer are switched off
 through the session's own settings where Windows offers them; the rung's frames agree with the
-duplication's to a mean of 0.01 codes, while the blit's differ by 0.43 and up to 249, which is
-the pointer the blit draws and the two DXGI paths do not.
+duplication's to a mean of 0.04 codes, while the blit's differ by 3.6, because the compositor
+tone-maps the float desktop when it hands GDI an SDR surface.
 
-Measured on this machine at 2560×1440 and 125% for one grab: 356–368 ms through Graphics
-Capture, 172 ms through Duplication, 32–39 ms through BitBlt. Graphics Capture still leads the
-chain, because a duplication holds the output exclusively for the length of the grab and makes
-any other capture tool lose it; a screenshot that costs 190 ms more must not interrupt someone
-else's recording. Two things are `[unverified]`: the half-float pool, because this display
-composes in SDR, and the frame's orientation on a rotated display, because the session path
+Measured on this machine at 2560×1440 and 125% for one grab: 331 ms through Graphics Capture,
+142 ms through Duplication, 41 ms through BitBlt. Graphics Capture still leads the chain,
+because a duplication holds the output exclusively for the length of the grab and makes any
+other capture tool lose it; a screenshot that costs 190 ms more must not interrupt someone
+else's recording. With the desktop composing in PQ, both DXGI rungs returned `Float16` frames
+and the half-float pool is verified end to end; the engine carries them without converting.
+Still `[unverified]`: the frame's orientation on a rotated display, because the session path
 rotates nothing while the duplication path turns its image upright.
 
 Window capture needs an item, not the system picker. Graphics Capture creates
@@ -891,7 +896,7 @@ flaky test.
 | Transparent surfaces and input regions | Done for a layer: `HTTRANSPARENT` is verified with `WindowFromPoint` landing on the window below. A translucent capture window is still planned |
 | Clipboard, drag-and-drop, hotkeys | A copy carries text, HTML, a file list and a picture, each as every Windows format it needs; a paste is text only; hotkeys done through `RegisterHotKey` against a message-only window; drag-and-drop and delayed rendering planned |
 | Named-pipe IPC | Server done: message mode verified by `host_services`, where a client connects, sends one message and reads the answer; a worker's deferred reply is implemented but unexercised |
-| Capture via WGC, Desktop Duplication and BitBlt | Done for a full output, one file per rung behind one trait: Graphics Capture through a free-threaded session, Duplication from a device on the output's adapter with the f16 composed surface converted to SDR sRGB, and a GDI blit as the last resort. Rotation and DPI scale are carried on the frame; the duplication path was verified against a chart of known codes on an auto colour managed desktop, and the three rungs agree on one desktop to a mean of 0.5 codes. HDR highlights clip, the session's float pool and rotated displays are unverified, window items and `WDA_EXCLUDEFROMCAPTURE` are planned |
+| Capture via WGC, Desktop Duplication and BitBlt | Done for a full output, one file per rung behind one trait: Graphics Capture through a free-threaded session, Duplication from a device on the output's adapter, and a GDI blit as the last resort. A float desktop travels as scRGB half floats under `PixelStorage::Float16`, unconverted, so a pin keeps its light above white; only a file's rendition encodes. Rotation and DPI scale are carried on the frame, and the two DXGI rungs agree on one desktop to a mean of 0.04 codes. Rotated displays and window items are unverified, and `WDA_EXCLUDEFROMCAPTURE` is planned |
 | The app on Windows | Started: `ui_host::connect` and `Host::languages` give an app one way in, the settings window builds and runs here and offers only the capture backends its build has, and `crabsnap-platform` is a facade over a Unix socket client and a Windows named-pipe client plus the save path's known folders and local clock. The capture frame and the rung trait live in `crabsnap-core`, and each platform crate has its own rungs; `crabsnap` itself still names Wayland in daemon, hotkeys and tray, and the tray and the ffmpeg shim are unstarted |
 | IME | Composition done through IMM32: open status from the frame's `ImeState`, composition and candidate windows at the caret, preedit and commit as engine events; surrounding text and `DeleteSurrounding` need TSF |
 | Packaging and signing | Planned |

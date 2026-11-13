@@ -189,8 +189,9 @@ impl<'a> Source<'a> {
         }
         let x = (x - self.origin.0).clamp(0, self.width as i32 - 1) as usize;
         let y = (y - self.origin.1).clamp(0, self.height as i32 - 1) as usize;
-        let index = (y * self.width as usize + x) * 4;
-        let Some(bytes) = self.data.get(index..index + 4) else {
+        let texel = self.colour.storage.bytes_per_texel();
+        let index = (y * self.width as usize + x) * texel;
+        let Some(bytes) = self.data.get(index..index + texel) else {
             return [0, 0, 0, 255];
         };
         let [r, g, b, a] = placement.texel(bytes);

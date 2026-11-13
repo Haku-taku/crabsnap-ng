@@ -2,12 +2,12 @@
 //!
 //! The engine's capture session photographs the display without holding it exclusively and
 //! without waiting for the desktop to change, so one grab opens its own session. An
-//! advanced-colour display is captured there in half floats and arrives as the sRGB codes a
-//! window drew, as a duplication's frame does.
+//! advanced-colour display is captured in half floats, which travel with the frame as the
+//! picture's own light, exactly as a duplication's do.
 
 use std::time::Duration;
 
-use crabsnap_core::capture::{Backend, Frame, PixelFormat, Started};
+use crabsnap_core::capture::{Backend, Frame, Started};
 use ui_platform_win32::GraphicsCapture;
 
 pub(crate) struct Wgc {
@@ -35,17 +35,7 @@ impl Backend for Wgc {
 
     fn grab(&mut self, timeout: Duration) -> Result<Frame, String> {
         let mut capture = GraphicsCapture::open(Some(&self.device))?;
-        let frame = capture.grab(timeout)?;
-        Ok(Frame {
-            width: frame.width,
-            height: frame.height,
-            stride: frame.width * 4,
-            pixels: frame.pixels,
-            format: PixelFormat::Rgba8,
-            colour: frame.colour,
-            output: Some(frame.output),
-            scale: frame.scale,
-        })
+        Ok(super::frame_of(capture.grab(timeout)?))
     }
 
     fn begin(self: Box<Self>, _timeout: Duration) -> Result<Started, String> {

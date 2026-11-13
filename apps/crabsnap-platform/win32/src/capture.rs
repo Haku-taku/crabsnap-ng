@@ -11,7 +11,9 @@ pub mod duplication;
 pub mod gdi;
 pub mod wgc;
 
-use crabsnap_core::capture::Capture;
+use crabsnap_core::capture::{Capture, Frame, PixelFormat};
+use ui_core::colour::PixelStorage;
+use ui_platform_win32::ScreenFrame;
 use windows::Win32::Foundation::{LPARAM, RECT, TRUE};
 use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW,
@@ -32,16 +34,41 @@ pub fn open(pinned: Option<&str>, output: usize) -> Result<Option<Capture>, Stri
             "unknown capture backend {pinned:?}; expected wgc, duplication or gdi"
         ));
     }
-    if allowed("wgc") && let Some(rung) = wgc::Wgc::new(output)? {
+    if allowed("wgc")
+        && let Some(rung) = wgc::Wgc::new(output)?
+    {
         return Ok(Some(Capture::new(Box::new(rung))));
     }
-    if allowed("duplication") && let Some(rung) = duplication::Duplication::new(output)? {
+    if allowed("duplication")
+        && let Some(rung) = duplication::Duplication::new(output)?
+    {
         return Ok(Some(Capture::new(Box::new(rung))));
     }
-    if allowed("gdi") && let Some(rung) = gdi::Blit::new(output)? {
+    if allowed("gdi")
+        && let Some(rung) = gdi::Blit::new(output)?
+    {
         return Ok(Some(Capture::new(Box::new(rung))));
     }
     Ok(None)
+}
+
+/// The app's frame for an engine grab: the packing follows the description the engine set.
+pub(crate) fn frame_of(frame: ScreenFrame) -> Frame {
+    let format = match frame.colour.storage {
+        // A float desktop keeps its half floats: the light above white is the picture's.
+        PixelStorage::Float16 => PixelFormat::Rgba16F,
+        _ => PixelFormat::Rgba8,
+    };
+    Frame {
+        width: frame.width,
+        height: frame.height,
+        stride: frame.stride(),
+        pixels: frame.pixels,
+        format,
+        colour: frame.colour,
+        output: Some(frame.output),
+        scale: frame.scale,
+    }
 }
 
 /// One monitor and what the app calls it.
@@ -68,9 +95,14 @@ impl Monitor {
 pub(crate) fn monitor(index: usize) -> Result<Monitor, String> {
     let mut found: Vec<(Monitor, bool)> = Vec::new();
     unsafe {
-        EnumDisplayMonitors(None, None, Some(visit), LPARAM(&mut found as *mut _ as isize))
-            .ok()
-            .map_err(|error| format!("EnumDisplayMonitors: {error}"))?;
+        EnumDisplayMonitors(
+            None,
+            None,
+            Some(visit),
+            LPARAM(&mut found as *mut _ as isize),
+        )
+        .ok()
+        .map_err(|error| format!("EnumDisplayMonitors: {error}"))?;
     }
     // Index 0 is what every caller that does not name an output means, so the primary leads;
     // the sort is stable, so the enumeration order survives behind it.
@@ -81,7 +113,10 @@ pub(crate) fn monitor(index: usize) -> Result<Monitor, String> {
         .map(|(monitor, _)| monitor)
         .nth(index)
         .ok_or_else(|| {
-            format!("this session reports {count} monitor(s); there is no monitor {}", index + 1)
+            format!(
+                "this session reports {count} monitor(s); there is no monitor {}",
+                index + 1
+            )
         })
 }
 

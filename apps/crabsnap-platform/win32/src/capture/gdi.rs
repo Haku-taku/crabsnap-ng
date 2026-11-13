@@ -9,7 +9,7 @@ use std::time::Duration;
 use crabsnap_core::capture::{Backend, Frame, PixelFormat, Started};
 use ui_core::colour::ContentColour;
 use windows::Win32::Graphics::Gdi::{
-    BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BitBlt, CAPTUREBLT, CreateCompatibleBitmap,
+    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CAPTUREBLT, CreateCompatibleBitmap,
     CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, HBITMAP, HDC,
     HGDIOBJ, ReleaseDC, SRCCOPY, SelectObject,
 };
@@ -91,7 +91,9 @@ impl Desktop {
                 let _ = DeleteDC(memory);
                 let _ = ReleaseDC(None, screen);
             }
-            return Err(format!("CreateCompatibleBitmap: no {width}x{height} bitmap"));
+            return Err(format!(
+                "CreateCompatibleBitmap: no {width}x{height} bitmap"
+            ));
         }
         let previous = unsafe { SelectObject(memory, bitmap.into()) };
         Ok(Self {

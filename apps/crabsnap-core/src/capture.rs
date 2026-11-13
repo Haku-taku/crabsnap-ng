@@ -22,6 +22,9 @@ pub enum PixelFormat {
     Bgrx8,
     /// 10 bits per channel, blue in the low bits: wl_shm's `xbgr2101010`.
     Bgr10,
+    /// Four half floats, red first: a desktop compositing in floats, whose light may exceed
+    /// the reference white.
+    Rgba16F,
 }
 
 impl PixelFormat {
@@ -30,6 +33,7 @@ impl PixelFormat {
         match self {
             PixelFormat::Rgba8 | PixelFormat::Bgra8 | PixelFormat::Bgrx8 => PixelStorage::Sdr8,
             PixelFormat::Bgr10 => PixelStorage::Packed10,
+            PixelFormat::Rgba16F => PixelStorage::Float16,
         }
     }
 }
@@ -59,7 +63,9 @@ impl Frame {
     pub fn into_image(self) -> Image {
         let mut data = self.pixels;
         match self.format {
-            PixelFormat::Rgba8 => {}
+            // Both come in the order the engine wants and are carried untouched: a float
+            // frame's whole point is that its light is not reduced to eight-bit codes.
+            PixelFormat::Rgba8 | PixelFormat::Rgba16F => {}
             PixelFormat::Bgra8 | PixelFormat::Bgrx8 => {
                 let opaque = self.format == PixelFormat::Bgrx8;
                 for pixel in data.as_chunks_mut::<4>().0 {
@@ -145,10 +151,11 @@ impl Image {
         }
         // A crop is a smaller copy of the same picture, not a rendition: the packing and the
         // description travel with it, so a pin of an HDR selection stays HDR.
-        let mut data = Vec::with_capacity((width * height * 4) as usize);
+        let texel = self.colour.storage.bytes_per_texel();
+        let mut data = Vec::with_capacity((width * height) as usize * texel);
         for row in y0..y1 {
-            let start = ((row * self.width + x0) * 4) as usize;
-            let end = start + (width * 4) as usize;
+            let start = ((row * self.width + x0) as usize) * texel;
+            let end = start + (width as usize) * texel;
             data.extend_from_slice(&self.data[start..end]);
         }
         Cropped {
@@ -196,11 +203,23 @@ impl Cropped {
             return std::borrow::Cow::Borrowed(self.data.as_slice());
         }
         let placement = placement.tabulated();
-        let mut rgba = Vec::with_capacity(self.data.len());
-        for texel in self.data.as_chunks::<4>().0 {
-            let [r, g, b, alpha] = placement.texel(texel);
+        let source = self.colour.storage.bytes_per_texel();
+        let mut rgba = Vec::with_capacity(self.data.len() / source * 4);
+        let convert = |bytes: &[u8], rgba: &mut Vec<u8>| {
+            let [r, g, b, alpha] = placement.texel(bytes);
             let byte = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
             rgba.extend_from_slice(&[byte(r), byte(g), byte(b), byte(alpha)]);
+        };
+        // A float picture is the one case a file sees with its light still above white; the
+        // placement clips it to the SDR peak, as every file this tool writes is SDR.
+        if source == 8 {
+            for texel in self.data.as_chunks::<8>().0 {
+                convert(texel, &mut rgba);
+            }
+        } else {
+            for texel in self.data.as_chunks::<4>().0 {
+                convert(texel, &mut rgba);
+            }
         }
         std::borrow::Cow::Owned(rgba)
     }
@@ -471,5 +490,37 @@ mod tests {
         let (codes, _) = PixelStorage::Packed10.unpack(&image.data[4..8]);
         assert_eq!(codes[1], 512.0 / 1023.0, "green is bits 10-19");
         assert_eq!(image.colour.storage, PixelStorage::Packed10);
+    }
+
+    /// A float frame is carried, not converted: its light above white is what a pin shows and
+    /// what only the display's own placement decides about.
+    #[test]
+    fn a_float_frame_keeps_the_light_above_white() {
+        // 8.0 is exact in binary16 and 640 nits in scRGB; alpha is 1.0.
+        let half = 0x4800u16.to_le_bytes();
+        let opaque = 0x3c00u16.to_le_bytes();
+        let frame = Frame {
+            width: 1,
+            height: 1,
+            stride: 8,
+            pixels: [half, half, half, opaque].concat(),
+            format: PixelFormat::Rgba16F,
+            colour: ContentColour::scrgb(1000.0),
+            output: None,
+            scale: 1.0,
+        };
+        let image = frame.into_image();
+        assert_eq!(
+            image.data.len(),
+            8,
+            "a float texel is eight bytes, not four"
+        );
+        assert_eq!(image.colour.storage, PixelStorage::Float16);
+        let (values, alpha) = PixelStorage::Float16.unpack(image.data.as_slice());
+        assert_eq!(
+            (values[0], alpha),
+            (8.0, 1.0),
+            "the light above white was reduced at ingest"
+        );
     }
 }
