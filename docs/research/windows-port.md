@@ -767,8 +767,8 @@ flaky test.
 | Win32 backend, D3D11 presenter | Done: window, input, DPI, clipboard text, theme, `HostSession` trait, and the process `Backend` (one pump, several windows, outputs, languages, waker); see `docs/src/rendering-backends.md` |
 | D3D11 renderer | Done |
 | Transparent surfaces and input regions | Planned; `HTTRANSPARENT` across processes is unverified |
-| Clipboard, drag-and-drop, hotkeys | Planned; format mapping is settled, the shell behaviour is not |
-| Named-pipe IPC | Planned; message mode and deferred replies are unverified |
+| Clipboard, drag-and-drop, hotkeys | Clipboard text and hotkeys done, the latter through `RegisterHotKey` against a message-only window; drag-and-drop planned |
+| Named-pipe IPC | Server done: message mode verified by `host_services`, where a client connects, sends one message and reads the answer; a worker's deferred reply is implemented but unexercised |
 | Capture via WGC and Desktop Duplication | Planned; the HDR path and the border behaviour are unverified |
 | IME | Planned; IMM32 composition only, surrounding text needs TSF |
 | Packaging and signing | Planned |

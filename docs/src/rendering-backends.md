@@ -179,10 +179,28 @@ its poll timeout between frames. Measured with
 of different sizes, both animating from `cx.now()`, ran 408 frames in 204 turns
 over 3 s, each surface drawing in every turn.
 
-Not implemented on the process loop: the named-pipe `Channel` behind `listen`,
-global hotkeys, and a selection reader for drag-and-drop formats. Each falls
-back to the trait's default, so a `Host` on Windows opens, runs and closes
-surfaces but cannot yet answer an IPC command.
+The local channel is a named pipe under `\\.\pipe\`, served in message mode so a
+read is one whole message. An accept thread hands each client to a reader thread
+that wakes the loop through the same event a worker uses, and `poll` only takes
+what has already arrived.
+
+Every handle is overlapped: a synchronous handle allows one operation at a time,
+so a reader parked in `ReadFile` would block the reply the loop writes on the
+same pipe. The pipe takes the process token's default descriptor and sets
+`PIPE_REJECT_REMOTE_CLIENTS`, so neither another user nor the network can
+connect. A copy of the peer's handle travels with the reply path, which is how
+`Reply::deferred` answers from a worker.
+
+Global hotkeys are `RegisterHotKey` against a message-only window of our own,
+whose procedure only records the id; `poll` maps it back to the application's
+`ShortcutId`. Registering against a window rather than the thread keeps
+`WM_HOTKEY` out of every surface's queue, and `Backend::wait` dispatches the
+thread's messages after it wakes, so a daemon with no window still receives one.
+A chord's required modifiers are what the registry binds; one the chord leaves
+optional cannot be expressed.
+
+Not implemented on the process loop: a selection reader for drag-and-drop
+formats, which falls back to the trait's default.
 
 A frame cannot be drawn *during* a modal sizing drag. `DefWindowProcW` runs the
 sizing loop on this thread, so the app loop is blocked inside it until the drag
@@ -528,6 +546,17 @@ time-reading control owe the next frame. Caught by
 `cx.now()`-driven windows went from 5 turns and 10 frames in 3 s to 204 turns
 and 408 frames, each surface drawing in every turn.
 
+**The named-pipe server deadlocked on its own reply.** The first version created
+the pipe without `FILE_FLAG_OVERLAPPED` and gave each connection a reader thread
+parked in `ReadFile`. A synchronous handle allows one operation at a time, so
+the `WriteFile` the handler made on the same handle waited behind that pending
+read, and the client waited for the write: the probe printed the message
+reaching the handler and then nothing, with no error anywhere. Every pipe handle
+is now overlapped and each operation completes through `GetOverlappedResult`
+with its own event, so a read and a write can be in flight together. Caught by
+`host_services`, which sends a message from a client thread and requires the
+answer back by the time the run ends.
+
 ## Status
 
 Implemented: both presenters, dma-buf zero-copy, explicit sync, HDR targets,
@@ -540,12 +569,13 @@ an app's loop is written once and names no backend; the Win32 implementation is
 built and exercised on this machine, the Wayland one is checked by reading each
 delegated signature until it is next built on Linux. The Win32 backend also
 implements the process `Backend`, so a `Host` on Windows runs several windows
-from one message pump and answers outputs, languages and the system clipboard.
+from one message pump, answers outputs, languages and the system clipboard, and
+serves a named-pipe channel and global hotkeys.
 
-Not implemented: on the Windows process loop, the named-pipe channel, global
-hotkeys and a selection reader; on the Windows window, IME, non-text clipboard
-formats, layer surfaces and HDR, and redraw during a modal resize drag; Vulkan.
-The Windows and Vulkan notes in `old/` are surveys, not code.
+Not implemented: on the Windows process loop, a selection reader; on the
+Windows window, IME, non-text clipboard formats, layer surfaces and HDR, and
+redraw during a modal resize drag; Vulkan. The Windows and Vulkan notes in
+`old/` are surveys, not code.
 
 ## See also
 

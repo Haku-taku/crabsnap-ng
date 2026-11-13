@@ -107,8 +107,9 @@ that a pin added to a canvas that is already up is held by the board and never p
 | Service | Portable form | What the backend does |
 | --- | --- | --- |
 | Clipboard | Copies from surfaces reach the loop; a handler with no surface asks through `MessageCtx::copy` | Own the data source and its pipes, release on replacement; the privileged data-control channel when the compositor has it, so a copy needs no input serial |
-| Hotkeys | `GlobalHotkeys` trait (exists) | Portal first, compositor protocol second; background reader wakes the loop |
+| Hotkeys | `GlobalHotkeys` trait (exists) | Portal first, compositor protocol second; background reader wakes the loop. On Windows `RegisterHotKey` against a message-only window, whose procedure records the press for `poll` |
 | Outputs | `OutputInfo` list through `Backend::outputs`, refreshed every turn | A second `wl_registry` on its own queue binds every `wl_output` and tracks add/remove, so a monitor plugged in after start is seen |
+| Local channel | `Channel` through `Host::listen`: whole messages, a reply path, `Reply::deferred` for a worker's answer | A `SOCK_SEQPACKET` socket on Unix; a message-mode named pipe on Windows, with an overlapped read and write per client so a parked read cannot block a reply |
 
 A surface's clipboard commands (the engine's `cx.copy_bytes` and paste requests) are drained by
 the loop, which pairs them with the serial of the surface that asked. The application never sees
@@ -207,8 +208,8 @@ drawn into a surface that no longer exists.
 `Host`, `SurfaceHandle`, `Backend` and `OpenOptions` exist in `ui-platform`; `WaylandBackend`
 implements the backend in `ui-platform-wayland`; `Session` implements `SurfaceHandle` with a
 non-blocking `step` beside the blocking `tick`. `Win32Backend` implements the backend on
-Windows, where surfaces open, run and close but the named-pipe channel, global hotkeys and a
-selection reader are still the trait's defaults. Every loop in the application runs on it: the
+Windows — surfaces, outputs, languages, the clipboard, the named-pipe channel and global
+hotkeys — where only the selection reader is still the trait's default. Every loop in the application runs on it: the
 toolbar's path on `Host::run_until`, the daemon's overlay and pin canvases (a hotkey press
 captures on the daemon's own connection and opens the overlay as a surface of the same loop),
 and the standalone `shot` and `pin` commands ([command line](../apps/cli.md)), which run a
