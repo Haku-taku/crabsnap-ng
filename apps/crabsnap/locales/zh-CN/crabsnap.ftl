@@ -1,6 +1,3 @@
-toolbar-title = Crabsnap
-toolbar-hint = 抓取尚未接入
-
 # 选区工具栏。
 action-save = 保存
 action-copy = 复制

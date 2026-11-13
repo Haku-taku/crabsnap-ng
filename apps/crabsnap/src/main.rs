@@ -6,12 +6,12 @@
 
 //! CrabSnap: a screenshot and pin tool on the ui engine.
 //!
-//! The process owns one compositor connection; every surface — this toolbar, the capture
-//! overlay and the pin canvases — is opened on it.
+//! The process owns one compositor connection; every surface — the capture overlay and the pin
+//! canvases — is opened on it.
 //!
 //! Commands: `crabsnap shot output|region`, `crabsnap pin …`, `crabsnap info …`,
 //! `crabsnap settings`; run `crabsnap --help` for the tree. With no argument the launch
-//! decides: a terminal shows the toolbar, a desktop icon starts the daemon.
+//! decides: from a terminal it prints that tree, a desktop icon starts the daemon.
 //! `CRABSNAP_SECONDS=n` still bounds a scripted run.
 
 mod toolbar;
@@ -64,65 +64,6 @@ use crate::document::{Document, Space};
 
 const EN: &str = include_str!("../locales/en/crabsnap.ftl");
 const ZH_CN: &str = include_str!("../locales/zh-CN/crabsnap.ftl");
-
-fn text(id: &'static str, body: Arc<str>, size: f32, ink: Color) -> ui_core::Decl {
-    let mut decl = ui_core::Decl::container(Id::str(id), NodeKind::Text).size(SizeClass {
-        width: AxisSize::hug(0.0, 0.0),
-        height: AxisSize::hug(size, size * 1.4),
-        grow_x: Grow::No,
-        grow_y: Grow::No,
-    });
-    decl.data = ui_core::NodeData::Text {
-        block: ui_core::TextBlock::plain(body.to_string(), ui_core::TextStyle::new(size)).into(),
-        ink,
-        caret: None,
-        selection: None,
-        composing: None,
-        nowrap: false,
-    };
-    decl
-}
-
-/// The toolbar the overlay shows before a capture exists.
-struct Toolbar {
-    language: Arc<Language>,
-}
-
-impl App for Toolbar {
-    fn view(&mut self, _cx: &mut ui_core::cx::Cx<'_>) -> Box<dyn Element> {
-        let catalog = self.language.catalog();
-        let title = catalog.text_by_id("toolbar-title");
-        let hint = catalog.text_by_id("toolbar-hint");
-        let bar = ui_core::Decl::container(Id::str("toolbar"), NodeKind::Row)
-            .size(SizeClass::fixed(480.0, 56.0))
-            .padding(Insets::all(14.0))
-            .gap(12.0)
-            .background(Color::from_rgba8(24, 26, 32, 240), Corners::all(14.0))
-            .border(Color::from_rgba8(96, 102, 116, 255), 1.0)
-            .child(text(
-                "toolbar/title",
-                title,
-                15.0,
-                Color::from_rgba8(232, 236, 244, 255),
-            ))
-            .child(text(
-                "toolbar/hint",
-                hint,
-                13.0,
-                Color::from_rgba8(150, 158, 172, 255),
-            ));
-        Box::new(
-            ui_platform::Container::new(Id::str("root"), NodeKind::Row)
-                .size(SizeClass {
-                    width: AxisSize::fill(0.0, 0.0),
-                    height: AxisSize::fill(0.0, 0.0),
-                    grow_x: Grow::Yes,
-                    grow_y: Grow::Yes,
-                })
-                .child_decl(bar),
-        )
-    }
-}
 
 /// What a surface needs from the user's environment: the configuration and the encoders it
 /// implies. Probing ffmpeg once per process is what makes a later save cheap.
@@ -2360,75 +2301,30 @@ fn band(rect: Rect, colour: Color) -> Shape {
 }
 
 fn main() -> Result<(), String> {
+    // A Windows build is a GUI-subsystem binary, and a shell hands a GUI child no console
+    // handles: without attaching to the parent's, every word this process prints is lost.
+    // Only the bare launch turns that answer into a decision; a command needs its output
+    // either way.
+    let terminal = crabsnap_platform::attach_terminal();
     let args: Vec<String> = std::env::args().skip(1).collect();
     // The language must be known before clap renders `--help`. A file that does not load
     // costs only the configured language here; parsing reports it properly afterwards.
     let config = Config::load(&crabsnap_platform::paths::config_path()).ok();
     let choice = language_choice(cli::prescan_lang(&args), config.as_ref())?;
     let language = load_language(choice)?;
-    if args.is_empty() {
-        if has_terminal() {
-            return toolbar(&language);
-        }
+    if args.is_empty() && !terminal {
         // A desktop icon asks for the tool to be there, not for a window: the process that
         // keeps it there is the daemon, and its failures have no console to land in.
         return crate::daemon::ensure(language)
             .inspect_err(|error| crabsnap_platform::alert(error));
     }
+    // A bare command line from a terminal is a question about what this program does, and the
+    // parser answers it with the tree.
     let catalog = language.catalog();
     let Some(invocation) = cli::parse(&args, &catalog)? else {
         return Ok(());
     };
     run::run(&language, invocation)
-}
-
-/// Whether this process's words have a terminal to land in. A desktop icon, a file manager
-/// and a login session start it with no terminal at all.
-fn has_terminal() -> bool {
-    use std::io::IsTerminal;
-    std::io::stdin().is_terminal()
-        || std::io::stdout().is_terminal()
-        || std::io::stderr().is_terminal()
-}
-
-/// The app's own chrome: a layer-surface toolbar, until commands take over.
-fn toolbar(language: &Arc<Language>) -> Result<(), String> {
-    let start = Instant::now();
-    let deadline = std::env::var("CRABSNAP_SECONDS")
-        .ok()
-        .and_then(|value| value.parse::<f32>().ok())
-        .map(|seconds| start + Duration::from_secs_f32(seconds));
-    let backend = ui_host::connect().map_err(|error| format!("the display: {error}"))?;
-    let mut host = Host::new(Box::new(backend));
-    host.open(
-        SurfaceSpec::layer(
-            "dev.crabsnap",
-            "crabsnap-toolbar",
-            LayerSpec {
-                level: Layer::Overlay,
-                anchor: Anchor {
-                    top: true,
-                    bottom: false,
-                    left: true,
-                    right: false,
-                },
-                size: Some((480, 56)),
-                exclusive: ExclusiveZone::Ignore,
-                margin: Insets::ZERO,
-                keyboard: KeyboardMode::None,
-            },
-        ),
-        Toolbar {
-            language: Arc::clone(language),
-        },
-        OpenOptions {
-            fonts: vec![fonts::icon_face()],
-            ..OpenOptions::default()
-        },
-    )?;
-    let stats = host.run_until(deadline)?;
-    println!("crabsnap: {} frames in {} turns", stats.frames, stats.turns);
-    Ok(())
 }
 
 /// The language the run uses: `--lang`, then `[ui] language`, then the system list.

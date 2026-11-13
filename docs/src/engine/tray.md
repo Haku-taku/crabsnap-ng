@@ -149,11 +149,12 @@ draws the icon and reads the pixel back.
 
 Registration with the running shell is not a unit test: it needs the
 notification area. It was checked on Windows 11 by starting the release binary
-the way a desktop icon does — `ShellExecute`, so no console — and reading the
-icon back from the shell with `Shell_NotifyIconGetRect`
-(`1974,1380`–`2014,1440`, inside the notification area's overflow), and by a
-second start exiting `0` with the first still answering the channel. The
-menu's appearance and dismissal still need a real right-click on the icon.
+from `explorer.exe`, whose process has no console — the same parent a
+double-click gives it — and reading the icon back from the shell with
+`Shell_NotifyIconGetRect` (`1974,1380`–`2014,1440`, inside the notification
+area's overflow); a second start exits `0` while the first still answers the
+channel. The menu's appearance and dismissal still need a real right-click on
+the icon.
 
 ## Status
 

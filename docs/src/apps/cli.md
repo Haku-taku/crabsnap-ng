@@ -53,11 +53,13 @@ the file.
 
 ## Starting it
 
-With no argument the launch decides what the process is. Started from a terminal it shows the
-toolbar; started with no terminal at all — a desktop icon, a file manager, a session's login
-entry — it starts the daemon, because a person who double-clicked asked for the tool to be
-there, not for a window. "No terminal" is stdin, stdout and stderr all not being a terminal,
-which is exactly how those launches arrive; a shell that redirected one of them still counts.
+With no argument the launch decides what the process is. Started from a terminal it prints the
+command tree — the same text `crabsnap --help` prints — because someone who typed the bare name
+is asking what the tool does; started with no terminal at all — a desktop icon, a file manager, a
+session's login entry — it starts the daemon, because a person who double-clicked asked for the
+tool to be there, not for a window. "No terminal" is stdin, stdout and stderr all not being a
+terminal, which is exactly how those launches arrive; a shell that redirected one of them still
+counts.
 
 The daemon puts its icon in the [system tray](../engine/tray.md), which is where a desktop
 start can be seen and stopped: the tooltip names the tool, and the menu offers Capture Region,
@@ -71,11 +73,14 @@ the tool to be running, and it is. `crabsnap daemon` keeps the strict answer and
 Settings… starts this binary again as `crabsnap settings`: that window owns its own connection
 and its own loop, so it cannot be a surface of the daemon.
 
-Windows builds are GUI-subsystem binaries, so a desktop start opens no console window; a
-terminal start still reaches the console through the handles it inherits, and a command's
-output is unchanged. The test harness is the exception and keeps the console subsystem, since
-a GUI one has nowhere to print its results. A failure on the desktop path has no console to
-land in: Windows shows a message box, Unix writes to stderr, which such a launch discards.
+Windows builds are GUI-subsystem binaries, so a desktop start opens no console window. A shell
+hands a GUI child no standard handles, though, so a terminal start attaches to the parent's
+console and reopens `CONOUT$` and `CONIN$` itself; that attach is what makes a command's output
+and `--help` work at all, and it happens on every invocation because every invocation may
+print. Only the bare launch turns "there is a console" into a decision. The test harness is the
+exception and keeps the console subsystem, since a GUI one has nowhere to print its results. A
+failure on the desktop path has no console to land in: Windows shows a message box, Unix writes
+to stderr, which such a launch discards.
 
 ## Commands
 
@@ -360,7 +365,7 @@ configured directory, so a scripted run never writes into the user's own folder.
 ## Status
 
 The command surface is in, on the framework host ([event loop](../engine/event-loop.md)). Bare
-`crabsnap` shows the toolbar from a terminal and starts the daemon without one; every other
+`crabsnap` prints the command tree from a terminal and starts the daemon without one; every other
 invocation parses a command.
 
 | Works today | Notes |
@@ -476,6 +481,25 @@ language flag became `--ui-language`: the top-level `--lang` already means "the 
 run", and the two are not the same choice. Verified by `--save` writing a file and refusing a bad
 tag before touching it, and by the window opening through the same `Host` every other surface
 uses.
+
+**A GUI-subsystem process has no terminal until it attaches to one.** The first version asked
+`std::io::IsTerminal` on the standard handles and nowhere else. Started from Windows Terminal's
+PowerShell, that answered "no terminal" — the launch started the daemon, and `crabsnap -h`
+printed nothing, because a shell hands a GUI child no standard handles at all. The process now
+attaches to its parent's console with `AttachConsole(ATTACH_PARENT_PROCESS)` and reopens
+`CONOUT$`/`CONIN$`, which is the documented route and the only one that gives `println!` a
+stream. Whether it has a console is `GetConsoleCP`, not `GetConsoleWindow`: a pseudoconsole,
+which is what Windows Terminal is, has no window, so the handle answers zero for an attached
+process too. Checked by launching from a console-attached shell — the command tree is printed
+and the process exits — and from `explorer.exe`, whose process has no console: that one starts
+the daemon and puts its icon in the tray.
+
+**The bare launch opened a stub bar.** A terminal start with no argument used to open a
+layer-surface bar reading "Capture is not wired up yet", left from before the overlay existed. It
+answered a question nobody asked — the bar's own subject was that it did nothing — while the one
+thing a person typing a bare program name wants is what it can be asked to do. The launch now
+prints the command tree, taking the parser's no-subcommand path, and the stub, its `Toolbar` app
+and its two strings are gone.
 
 ## See also
 

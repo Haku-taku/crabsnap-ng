@@ -23,3 +23,11 @@ pub const CAPTURE_BACKENDS: &[&str] = &["auto", "ext", "screencopy", "portal"];
 pub fn alert(message: &str) {
     eprintln!("{message}");
 }
+
+/// 进程有没有一块终端。终端启动的进程本来就有；桌面的启动没有，也没有父进程可以接上去。
+pub fn attach_terminal() -> bool {
+    use std::io::IsTerminal;
+    std::io::stdin().is_terminal()
+        || std::io::stdout().is_terminal()
+        || std::io::stderr().is_terminal()
+}

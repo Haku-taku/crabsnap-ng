@@ -1,7 +1,3 @@
-# The toolbar the overlay shows before a capture exists.
-toolbar-title = Crabsnap
-toolbar-hint = Capture is not wired up yet
-
 # The selection's action bar.
 action-save = Save
 action-copy = Copy
