@@ -992,6 +992,16 @@ foreign host to the local and UNC paths Windows uses. Caught by
 it passed, `a_copied_path_becomes_a_file_uri`, `a_windows_file_uri_names_a_drive_or_a_share`,
 and three live pins from a DIB-only picture, a copied file and copied text.
 
+**The status page said a Windows capture gave SDR codes.** The duplication asked for the float
+surface, and the capture session carried it unconverted, since "Carry light above SDR white as
+half floats" — but this page's status still described a capture that returned "SDR sRGB codes"
+and listed HDR content as not implemented. A reader would have looked for a conversion that does
+not exist, or tonemapped a frame twice. The paragraph now says what arrives: half-float scRGB
+with the display's peak beside it on an advanced-colour desktop, 8-bit sRGB otherwise. Code
+cannot drift from this again quietly, because a frame carries its `Colour` and every consumer
+switches on it; the file path through that switch is pinned by
+`a_measured_picture_rolls_its_highlights_into_the_file_white`.
+
 **A per-output surface landed on the primary monitor.** The app opens one canvas per output and
 one overlay over the output it just captured, and sized each for that output's rectangle, but the
 portable spec named no output at all, so every layer opened on the primary monitor: a pin taken
@@ -1036,21 +1046,25 @@ another, so a click leaves it wherever it claims nothing; the strip an
 auto-hidden taskbar hides behind stays with the desktop unless the spec covers
 it, and a `FollowPointer` layer takes the keyboard on a click and hands it back
 when the pointer leaves.
+
 An input method composes through IMM32, with the engine's preedit and
-commit events and the IME windows at the caret. A screen capture duplicates an
-output through Desktop Duplication, asking for the surface an advanced colour
-desktop composes in and returning SDR sRGB codes. A surface whose device DXGI
-reports as removed, or whose window hears that the display changed, rebuilds its
-device, chain and renderer and redraws; the process loop retires a surface that
-fails rather than ending.
+commit events and the IME windows at the caret. A screen capture runs a Windows
+Graphics Capture session over one output, or duplicates it through Desktop
+Duplication, and an advanced-colour desktop arrives as the half-float scRGB
+surface it composes, unconverted, with the display's peak beside it; an 8-bit
+desktop arrives as sRGB codes. A surface whose device DXGI reports as removed,
+or whose window hears that the display changed, rebuilds its device, chain and
+renderer and redraws; the process loop retires a surface that fails rather than
+ending.
 
 Not implemented: on the Windows window, a paste that carries more than text
 into an editor (the event carries a string, though the process can read a file
-list or a picture), the input method's surrounding text (which needs TSF), and
-redraw during a modal resize drag; in a capture, HDR content (a float frame is
-converted to SDR, so light past SDR white clips, and a frame larger than one
-output is not assembled); Vulkan. The Windows and Vulkan notes in `old/` are
-surveys, not code.
+list or a picture), the input method's surrounding text and `DeleteSurrounding`
+— TSF's `ITextStoreACP`, which replaces the IMM32 path rather than sitting
+beside it and needs an IME to verify — redraw during a modal resize drag, and
+`ExclusiveZone::Reserve`; in a capture, a frame larger than one output assembled
+into one picture, and the GDI rung's colours, which are 8-bit by nature; Vulkan.
+The Windows and Vulkan notes in `old/` are surveys, not code.
 
 ## See also
 

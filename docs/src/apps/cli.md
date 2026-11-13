@@ -213,7 +213,7 @@ platform code out of the app and protocol code out of the framework.
 
 | Layer | Where | What |
 | --- | --- | --- |
-| Transport | `ui-platform::ipc` traits; backend per OS | A message-oriented local channel. Implemented on Linux: `SOCK_SEQPACKET` at `$XDG_RUNTIME_DIR/crabsnap/daemon-<display>.sock`, because a daemon is bound to the compositor it connected to. Windows named pipes are the other backend, not written yet |
+| Transport | `ui-platform::ipc` traits; backend per OS | A message-oriented local channel. On Linux a `SOCK_SEQPACKET` socket at `$XDG_RUNTIME_DIR/crabsnap/daemon-<display>.sock`, because a daemon is bound to the compositor it connected to; on Windows a message-mode named pipe `\\.\pipe\crabsnap-daemon-<session>`, with the logon session in the name because every pipe on a machine shares one namespace |
 | Bulk data | `ui-platform` | A shared buffer: memfd on Linux, `shm_open` on macOS, named file mapping on Windows; the owner passes a token, the reader maps it. Not needed yet: no command returns pixels |
 | Messages | `crabsnap-core` | Versioned op codes and request/response types, encoded with a fixed header plus `bincode` |
 
@@ -537,6 +537,14 @@ answered a question nobody asked — the bar's own subject was that it did nothi
 thing a person typing a bare program name wants is what it can be asked to do. The launch now
 prints the command tree, taking the parser's no-subcommand path, and the stub, its `Toolbar` app
 and its two strings are gone.
+
+**The IPC table called the Windows channel unwritten.** It said named pipes were "the other
+backend, not written yet" while `ui-platform-win32/src/ipc.rs` was already carrying every command
+on Windows. A daemon started here logs `daemon: listening on crabsnap-daemon-1`, and `crabsnap
+quit` reaches `\\.\pipe\crabsnap-daemon-1` and gets its answer. The row names both transports now,
+and why each is shaped as it is: a socket per display, because a daemon belongs to the compositor
+it connected to, and a pipe per logon session, because every pipe on a machine shares one
+namespace.
 
 ## See also
 
