@@ -27,6 +27,15 @@ pub fn shot_dir(configured: Option<&Path>) -> PathBuf {
     )
 }
 
+/// The configuration file: `XDG_CONFIG_HOME`, else `~/.config`, else temporary.
+pub fn config_path() -> PathBuf {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| Path::new(&home).join(".config")))
+        .unwrap_or_else(std::env::temp_dir);
+    crabsnap_core::paths::config_path(&base)
+}
+
 /// A screenshot's file name, without a directory.
 pub fn shot_name(extension: &str, unix_secs: i64, output: Option<&str>) -> String {
     crabsnap_core::paths::shot_name(extension, &stamp(unix_secs), output)

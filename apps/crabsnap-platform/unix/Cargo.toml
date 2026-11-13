@@ -9,8 +9,16 @@ description = "The daemon channel on a Unix session: a sequence-packet socket in
 [lib]
 path = "src/platform.rs"
 
+# The ffmpeg shim is C: it declares libav*'s functions itself and loads the libraries at
+# runtime, so the headers are all the build needs.
+[build-dependencies]
+cc = "1"
+
 [dependencies]
 crabsnap-core = { path = "../../crabsnap-core" }
+
+# The crate is empty off unix, so these are declarations only a Unix build compiles.
+[target.'cfg(unix)'.dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }
 libc = "0.2"
 rustix = { version = "1", features = ["event", "net"] }

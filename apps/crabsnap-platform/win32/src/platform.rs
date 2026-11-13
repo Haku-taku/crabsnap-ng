@@ -1,9 +1,15 @@
 //! What the app asks of a Windows session: the daemon channel, the user's directories and
 //! clock, and the names of the capture backends this build can be told to use.
+//!
+//! The crate is empty off Windows: a named pipe, a monitor enumeration and a DXGI grab cannot
+//! exist without those calls, so a Unix workspace builds it empty.
+
+#![cfg(windows)]
 
 pub mod capture;
 pub mod channel;
 pub mod paths;
+pub mod shim;
 
 pub use channel::{Client, ClientError, address};
 

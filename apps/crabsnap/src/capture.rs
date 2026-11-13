@@ -8,7 +8,7 @@
 pub use crabsnap_core::capture::{
     Cropped, Frame, Image, Pending, Started, density, pixels_per_metre, png_scale, read_png,
 };
-pub use crabsnap_platform::capture::open;
+pub use crabsnap_platform::capture::{Session, open};
 
 #[cfg(test)]
 mod tests {

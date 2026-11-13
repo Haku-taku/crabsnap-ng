@@ -19,6 +19,11 @@ pub fn shot_dir(
         .unwrap_or(temporary)
 }
 
+/// Where the configuration lives under `base`, which the platform answers for.
+pub fn config_path(base: &Path) -> PathBuf {
+    base.join("crabsnap").join("config.toml")
+}
+
 /// A screenshot's file name, without a directory.
 ///
 /// `output` is the screen the picture came from: with several outputs, two shots in the same

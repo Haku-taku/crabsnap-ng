@@ -2,7 +2,9 @@
 
 What a Windows port of the engine and the screenshot app must preserve, which
 Win32 APIs replace the Wayland ones, and whether Vulkan is the right first
-renderer. This is a report. No code has been changed.
+renderer. This began as a report; what has since become code is marked in
+[Status](#status), and where the code chose differently from the plan the reason
+is under [Corrections](#corrections).
 
 ## Problem
 
@@ -737,10 +739,24 @@ window offers only `auto` where a Wayland one offers the three rungs. The Unix
 client type-checks for Linux and the Windows one is a message-mode named pipe
 scoped to the logon session, where `WaitNamedPipe` with a zero timeout answers
 whether a daemon exists and `CallNamedPipe` carries one request and one answer.
-`crabsnap` itself still names Wayland in its daemon, hotkey and tray modules. The frame, its
-packings, the crop and the rung trait have left into `crabsnap-core`, and the platform
-crates own the rungs: the Unix ones are `ext.rs`, `screencopy.rs` and `portal.rs` plus the
+`crabsnap` no longer names a backend: it opens through `ui_host::connect` and its manifest
+carries no Wayland dependency, so which backend answers is `ui-host`'s target table alone.
+One thing the app must still take from the backend is the display connection itself: a
+Wayland grab has to borrow the loop's own, because the loop waits on that connection and a
+grab on a connection of its own would only be read when the loop's next deadline expired.
+That borrow is a per-platform `capture::Session` — a cloned `WaylandLink` on Unix, an empty
+witness on Windows — so both platforms open a rung the same way. The frame, its packings,
+the crop and the rung trait live in `crabsnap-core`, and the platform crates own the rungs:
+the Unix ones are `ext.rs`, `screencopy.rs` and `portal.rs` plus the
 `wp_color_manager_v1` description, and its 2000-line capture file is gone.
+
+Built and run on Windows: `info status` reports `capture: ready` and the monitor with its
+scale, `-D shot output -f out.png` wrote a 2560x1440 frame of the real desktop and the file
+was looked at, `-D shot region --demo` drew the frozen screen, the selection and its readout
+and toolbar, and the settings window came up with the system's Chinese catalogue. The
+toolbar of a bare `crabsnap` run renders too, read back from its own window. Two gaps stay
+open: the icons draw as empty boxes because Material Symbols is a system font this repo
+does not bundle and no Windows machine has it, and the tray icon is unstarted.
 
 The daemon runs as the user, not as a service. It owns the pipe, the clipboard,
 the hotkeys, the tray icon, and the output list, and it creates surfaces on
@@ -757,9 +773,15 @@ uses the Fluent controls the app already has.
 
 Paths come from known folders, not environment variables: `FOLDERID_Pictures`
 for the default save directory, `FOLDERID_RoamingAppData` for the config, and
-`FOLDERID_LocalAppData` for the log. Only the first is wired so far, through
-`SHGetKnownFolderPath`, because the user may have moved the folder to another
-drive; the same module keeps `Screenshots/` under it, as the Wayland build does.
+`FOLDERID_LocalAppData` for the log. The first two are wired through
+`SHGetKnownFolderPath`, because the user may have moved either to another drive;
+the pictures module keeps `Screenshots/` under its folder, as the Wayland build
+does, and `info config` prints
+`C:\Users\<user>\AppData\Roaming\crabsnap\config.toml`, with `%APPDATA%` as the
+answer when the known folder cannot be read. The log's folder is not wired yet.
+Which folder is the base and what hangs off it are two answers, not one:
+`crabsnap-core` owns the policy — `config_path(base)` — and the platform crate
+answers the base.
 The stamp is the other platform answer: epoch seconds carry no offset, so
 `SystemTimeToTzSpecificLocalTime` supplies the local calendar fields, and a
 machine with no usable zone files the shot in UTC rather than failing. The
@@ -773,13 +795,30 @@ use the `\\?\` prefix where a user-controlled name reaches a Win32 call.
 
 ### ffmpeg
 
-The shim is C and stays C. `dlopen` becomes `LoadLibraryExW` with
-`LOAD_LIBRARY_SEARCH_DEFAULT_DIRS`, `dlsym` becomes `GetProcAddress`, and the
-library names become `avcodec-61.dll`, `avformat-61.dll`, `avutil-59.dll`, and
-`swscale-8.dll`. The app calls `SetDefaultDllDirectories` at startup and adds
-its own `ffmpeg` directory with `AddDllDirectory`; it never calls
-`SetDllDirectory("")`, which is the DLL-hijack path the repository's other
-platform code already avoids.
+The shim is C and stays C, but it is also the one piece of the app that cannot be
+written in portable Rust: it `dlopen`s libavcodec, and `dlopen` names a Unix loader. So
+the split follows the loader, not the feature. `crabsnap-core::ffmpeg` holds the data
+types both sides hand across — muxers, encoders, encoder options, the colour record and a
+decoded picture — as plain structs with `&str` accessors, so nothing in the portable crate
+names C or a platform. `crabsnap-platform-unix` compiles `ffi/ffmpeg_shim.c` with `cc`,
+links `-pthread`, finds its headers through pkg-config, and maps the C records onto those
+types. `crabsnap-platform-win32` answers the same functions in Rust and answers "absent":
+no library loader, no muxers, no encoders, and an encode or decode that says why. The
+build script of the Unix crate returns before it looks for anything when the target is not
+Unix, so the Windows workspace builds the crate empty rather than failing.
+
+What Windows does instead is not started. `dlopen` becomes `LoadLibraryExW` with
+`LOAD_LIBRARY_SEARCH_DEFAULT_DIRS`, `dlsym` becomes `GetProcAddress`, and the library names
+become `avcodec-61.dll`, `avformat-61.dll`, `avutil-59.dll`, and `swscale-8.dll`; the app
+would call `SetDefaultDllDirectories` at startup and add its own `ffmpeg` directory with
+`AddDllDirectory`, never `SetDllDirectory("")`, which is the DLL-hijack path the
+repository's other platform code already avoids. Until then a Windows build encodes PNG
+and nothing else, and decodes what its own reader can read.
+
+That reader is the one format the build writes itself: PNG. With no ffmpeg library and no
+`ffmpeg` on `PATH`, a decode falls back to it instead of failing, so a read path —
+`pin add` — still opens the pictures this app saves. It could not before, and a test that
+opens a list of files and names the bad one caught it.
 
 The executable fallback spawns `ffmpeg.exe` with `CREATE_NO_WINDOW` and puts it
 in a job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so a crash does not
@@ -897,7 +936,7 @@ flaky test.
 | Clipboard, drag-and-drop, hotkeys | A copy carries text, HTML, a file list and a picture, each as every Windows format it needs; a paste is text only; hotkeys done through `RegisterHotKey` against a message-only window; drag-and-drop and delayed rendering planned |
 | Named-pipe IPC | Server done: message mode verified by `host_services`, where a client connects, sends one message and reads the answer; a worker's deferred reply is implemented but unexercised |
 | Capture via WGC, Desktop Duplication and BitBlt | Done for a full output, one file per rung behind one trait: Graphics Capture through a free-threaded session, Duplication from a device on the output's adapter, and a GDI blit as the last resort. A float desktop travels as scRGB half floats under `PixelStorage::Float16`, unconverted, so a pin keeps its light above white; only a file's rendition encodes. Rotation and DPI scale are carried on the frame, and the two DXGI rungs agree on one desktop to a mean of 0.04 codes. Rotated displays and window items are unverified, and `WDA_EXCLUDEFROMCAPTURE` is planned |
-| The app on Windows | Started: `ui_host::connect` and `Host::languages` give an app one way in, the settings window builds and runs here and offers only the capture backends its build has, and `crabsnap-platform` is a facade over a Unix socket client and a Windows named-pipe client plus the save path's known folders and local clock. The capture frame and the rung trait live in `crabsnap-core`, and each platform crate has its own rungs; `crabsnap` itself still names Wayland in daemon, hotkeys and tray, and the tray and the ffmpeg shim are unstarted |
+| The app on Windows | Builds and runs: `crabsnap` and `crabsnap-settings` compile for Windows with no Wayland dependency, and `ui_host::connect` is the one way in. Verified here: `info status` reports the capture rung and the monitor, `-D shot output` wrote a real 2560x1440 frame, `-D shot region --demo` drew the frozen screen with its selection, readout and toolbar, and the settings window came up. `crabsnap-platform` is a facade over a Unix socket client and a Windows named-pipe client, the save path's known folders and local clock, and the ffmpeg shim — C on Unix, "absent" in Rust on Windows, with a PNG reader as the decode fallback. Not done: the tray icon, the Material Symbols font the toolbar icons need, and the Windows ffmpeg loader |
 | IME | Composition done through IMM32: open status from the frame's `ImeState`, composition and candidate windows at the caret, preedit and commit as engine events; surrounding text and `DeleteSurrounding` need TSF |
 | Packaging and signing | Planned |
 | Vulkan | Not planned; see [Is Vulkan the right renderer?](#vulkan) |
@@ -921,10 +960,10 @@ here because the port is where they stop being harmless.
   true for the loop and false for the renderer: `ui-paint-gpu` depends on
   `ui-gpu-egl` unconditionally, and `GpuSurface::bind` takes a `glow::Context`.
   A second GPU API needs the extraction described above.
-- `event-loop.md` says the app's platform layer obtains the backend. In the
-  tree, every binary constructs `WaylandBackend::connect()` directly, and
-  `apps/crabsnap-platform` is a Unix socket client. The seam is planned, not
-  implemented.
+- `event-loop.md` says the app's platform layer obtains the backend. Every binary
+  now goes through `ui_host::connect`, and the one thing they take from the
+  backend is the `capture::Session` a grab borrows the loop's connection with.
+  The page should say that rather than describe the seam as planned.
 - `window.md` says a platform without layer surfaces approximates the role with
   `WS_EX_TOPMOST` and `WS_EX_TOOLWINDOW` and ignores `keyboard`. The real
   approximation also covers placement from anchor, size and margin, activation,
@@ -944,6 +983,43 @@ Vulkan is still absent. What remains of stage 2 is unmeasured rather than
 unwritten: no display here composes in HDR, so the half-float chain has only been
 exercised with the renderer forced and the back buffer read back, not on a panel
 showing PQ.
+
+## Corrections
+
+**The grab owned its own display connection.** The first cut of the app's platform
+seam opened a second Wayland connection for a capture. That connection is waited on
+by nobody: the loop sleeps on its own connection, and a pending grab is polled once
+per turn, so a frame arriving on a private one is read only when the loop's next
+deadline expires — two seconds of latency on every capture, and none at all if the
+loop is idle with no deadline. A `capture::Session` now carries the backend's own
+connection (a clone of the `WaylandLink`), which is what the rung polls. What
+catches it now: the Wayland rung's `Pending::poll`/`deadline` pair, and the app's
+`Session::of(&backend)` call before the backend moves into the host.
+
+**The app borrowed a Windows answer for a Unix question.** `Config::path()` lived in
+`crabsnap-core` and built `$HOME/.config/crabsnap/config.toml` on every target, so a
+Windows build filed its config under whatever `HOME` said. Which folder is the base
+is now a platform answer — `XDG_CONFIG_HOME` or `~/.config` on Unix,
+`FOLDERID_RoamingAppData` on Windows — and `crabsnap-core::paths::config_path(base)`
+keeps the policy of what hangs off it. What catches it now: `info config` prints the
+resolved path, and the two platform crates answer it separately.
+
+**A platform crate that does not compile off its target takes the workspace with it.**
+`cargo check --workspace` on Windows failed inside `wayland-sys`, pulled in by the
+Unix platform crate's dependencies. The crates are now empty off their own target
+(`#![cfg(unix)]`, `#![cfg(windows)]`, as `ui-platform-win32` already was), the Unix
+build script returns before it looks for headers, and the ffmpeg bindings follow the
+C compiler that only Unix has rather than the feature. What catches it now:
+`cargo build --workspace` on Windows, and the app's own build.
+
+**Presentation went through an HWND swapchain, not composition.** D2 argues for
+`CreateSwapChainForComposition` because an HWND swapchain cannot be premultiplied,
+and that is still where a translucent surface has to go. What was built presents
+through `CreateSwapChainForHwnd` with `DXGI_ALPHA_MODE_UNSPECIFIED`, which is opaque:
+a window, the overlay and the toolbar all draw correctly, and a surface whose pixels
+are partly transparent composites as if they were not. What catches it now: the
+Status row on transparent surfaces, which still names them as planned, and the app's
+toolbar, whose 240-alpha bar renders opaque.
 
 ## See also
 

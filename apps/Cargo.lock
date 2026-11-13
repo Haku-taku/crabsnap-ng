@@ -397,32 +397,27 @@ dependencies = [
 name = "crabsnap"
 version = "0.1.0"
 dependencies = [
- "cc",
  "clap",
  "clap_complete",
  "crabsnap-core",
  "crabsnap-platform",
  "fontdb",
  "image",
- "libc",
  "png 0.18.1",
  "resvg",
  "ui-color-hct",
  "ui-core",
  "ui-design",
  "ui-highlight",
+ "ui-host",
  "ui-i18n",
  "ui-paint",
  "ui-platform",
- "ui-platform-wayland",
  "ui-richtext",
  "ui-style",
  "ui-widgets",
  "ui-widgets-md3",
  "usvg",
- "wayland-client",
- "wayland-protocols",
- "wayland-protocols-wlr",
 ]
 
 [[package]]
@@ -448,6 +443,7 @@ dependencies = [
 name = "crabsnap-platform-unix"
 version = "0.1.0"
 dependencies = [
+ "cc",
  "crabsnap-core",
  "image",
  "libc",

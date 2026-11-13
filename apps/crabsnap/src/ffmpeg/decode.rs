@@ -6,9 +6,10 @@
 
 use std::sync::Arc;
 
+use crabsnap_platform::shim;
 use ui_core::colour::{Chromaticities, ContentColour, PixelStorage, TransferFunction};
 
-use super::{Ffmpeg, Source, shim};
+use super::{Ffmpeg, Source};
 
 /// One decoded picture: straight-alpha RGBA8, or 2-10-10-10 words, as `colour` says.
 pub struct Decoded {
@@ -45,11 +46,23 @@ impl Ffmpeg {
                     colour: ContentColour::SDR,
                 })
             }
-            Source::None => Err(format!(
-                "cannot read this picture: {}",
-                self.failure()
-                    .unwrap_or_else(|| "no ffmpeg libraries and no ffmpeg program".into())
-            )),
+            // PNG is the one format this build writes itself, so its own reader is what it can
+            // always go back to; it is 8-bit sRGB, which is what this build writes.
+            Source::None => {
+                let (width, height, data) = crate::capture::read_png(bytes).map_err(|error| {
+                    format!(
+                        "cannot read this picture: {error}; {}",
+                        self.failure()
+                            .unwrap_or_else(|| "no ffmpeg libraries and no ffmpeg program".into())
+                    )
+                })?;
+                Ok(Decoded {
+                    width,
+                    height,
+                    data: Arc::new(data),
+                    colour: ContentColour::SDR,
+                })
+            }
         }
     }
 }

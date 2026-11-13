@@ -17,7 +17,6 @@ use ui_platform::SurfaceId;
 use ui_platform::host::{Effect, Host, MessageCtx, OpenOptions};
 use ui_platform::hotkeys::GlobalHotkeyError;
 use ui_platform::ipc::Reply;
-use ui_platform_wayland::{WaylandBackend, WaylandLink};
 
 use crate::Settings;
 use crate::capture;
@@ -37,8 +36,8 @@ struct Service {
     hotkeys: Plan,
     /// 绑定的结果，`info status` 原样报告。
     hotkey_lines: Vec<String>,
-    /// 进程唯一的连接；抓取要在两次等待之间借它，reload 也靠它重新探测。
-    link: WaylandLink,
+    /// 抓取要借的那条连接；reload 也靠它重新探测。
+    grab: capture::Session,
     /// 屏幕上那块 overlay 交回的贴图，每回合收一次。
     pin_outbox: Rc<RefCell<Vec<Pin>>>,
     /// 当前那块 overlay；`None` 或已经关掉时，下一次按键才允许再开。
@@ -80,11 +79,11 @@ pub fn run(idle: Option<u64>, language: Arc<Language>) -> Result<(), String> {
     if crabsnap_platform::Client::connect().is_ok() {
         return Err("a daemon is already running".into());
     }
-    let backend = WaylandBackend::connect().map_err(|error| format!("wayland: {error}"))?;
-    // 重新探测要再借一次连接；后端随后独占它，所以先留一份克隆。
-    let link = backend.link().clone();
+    let backend = ui_host::connect().map_err(|error| format!("the display: {error}"))?;
+    // 后端随后被 host 独占，抓取要借的那份连接在它还在手上时取下。
+    let grab = capture::Session::of(&backend)?;
     let settings = Settings::load(language)?;
-    let capture = probe(&link, &settings)?;
+    let capture = probe(&grab, &settings)?;
     let mut host = Host::new(Box::new(backend));
     let service = Rc::new(RefCell::new(Service {
         capture,
@@ -97,7 +96,7 @@ pub fn run(idle: Option<u64>, language: Arc<Language>) -> Result<(), String> {
         settings,
         hotkeys: Plan::default(),
         hotkey_lines: Vec::new(),
-        link,
+        grab,
         pin_outbox: Rc::new(RefCell::new(Vec::new())),
         overlay: None,
         pending: None,
@@ -398,7 +397,7 @@ fn reload(service: &mut Service) -> Result<(), String> {
     // The language object is shared with every open canvas; the new settings hold the same
     // one, so the choice is changed in place instead of replacing the object under them.
     let settings = Settings::load(Arc::clone(&service.settings.language))?;
-    let capture = probe(&service.link, &settings)?;
+    let capture = probe(&service.grab, &settings)?;
     let choice = crate::language_choice(None, Some(&settings.config))?;
     service
         .settings
@@ -436,12 +435,12 @@ fn start_capture(
         _ => 0,
     };
     let Some(to_grab) = capture::open(
-        &service.link,
+        &service.grab,
         service.settings.config.capture.backend.as_deref(),
         output,
     )?
     else {
-        return Err("this compositor offers no screen capture protocol".into());
+        return Err("no screen capture backend is available".into());
     };
     match to_grab.begin(Duration::from_secs(2))? {
         capture::Started::Pending(pending) => {
@@ -568,9 +567,9 @@ fn save_frame(service: &Service, frame: capture::Frame) -> Result<(), String> {
     Ok(())
 }
 
-fn probe(link: &WaylandLink, settings: &Settings) -> Result<String, String> {
+fn probe(grab: &capture::Session, settings: &Settings) -> Result<String, String> {
     Ok(
-        match capture::open(link, settings.config.capture.backend.as_deref(), 0)? {
+        match capture::open(grab, settings.config.capture.backend.as_deref(), 0)? {
             Some(capture) => capture.name().to_string(),
             None => "none".to_string(),
         },
@@ -620,7 +619,7 @@ fn add_pin(
         let outputs = cx.outputs();
         let target = outputs.get(index).ok_or_else(|| {
             format!(
-                "this compositor reports {} output(s); there is no output {}",
+                "this display reports {} output(s); there is no output {}",
                 outputs.len(),
                 index + 1
             )
@@ -761,7 +760,7 @@ fn finish_selection(
             Some(target) => target,
             None => {
                 eprintln!(
-                    "pin: this compositor reports {} output(s); there is no output {}",
+                    "pin: this display reports {} output(s); there is no output {}",
                     outputs.len(),
                     index + 1
                 );

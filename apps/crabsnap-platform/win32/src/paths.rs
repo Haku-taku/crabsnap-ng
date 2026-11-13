@@ -10,7 +10,9 @@ use windows::core::GUID;
 use windows::Win32::Foundation::SYSTEMTIME;
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::Time::SystemTimeToTzSpecificLocalTime;
-use windows::Win32::UI::Shell::{FOLDERID_Pictures, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+use windows::Win32::UI::Shell::{
+    FOLDERID_Pictures, FOLDERID_RoamingAppData, KF_FLAG_DEFAULT, SHGetKnownFolderPath,
+};
 
 pub use crabsnap_core::paths::now_secs;
 
@@ -29,6 +31,15 @@ pub fn shot_dir(configured: Option<&Path>) -> PathBuf {
         picture_dir(),
         std::env::temp_dir(),
     )
+}
+
+/// The configuration file: the roaming profile, so a user's settings follow them to another
+/// machine, with `%APPDATA%` as the answer when the known folder cannot be read.
+pub fn config_path() -> PathBuf {
+    let base = known_folder(&FOLDERID_RoamingAppData)
+        .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))
+        .unwrap_or_else(std::env::temp_dir);
+    crabsnap_core::paths::config_path(&base)
 }
 
 /// A screenshot's file name, without a directory.

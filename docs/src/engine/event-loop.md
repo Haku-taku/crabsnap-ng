@@ -163,10 +163,11 @@ host to poll.
 ## Application API
 
 ```rust
-let mut host = crabsnap_platform::host()?;          // portable value; backend hidden
-let overlay = host.open(overlay_spec(), Overlay::new(...))?;
+let backend = ui_host::connect()?;                  // the target's backend, chosen by ui-host
+let mut host = Host::new(Box::new(backend));        // the portable loop; the app names no platform
+let overlay = host.open(overlay_spec(), Overlay::new(...), options)?;
 host.on_hotkey(|id, cx| { ...; Effect::None });    // actions, not platform events
-host.on_source(ipc, |ctx, request| { ... });
+host.listen(crabsnap_ipc, |reply, bytes, cx| { ... });
 host.on_turn(|cx, turn| { ...; turn.set_deadline(...) });
 host.run()?;
 ```

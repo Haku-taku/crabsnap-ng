@@ -807,7 +807,7 @@ The command surface follows the sources:
 | `apps/crabsnap-core/src/protocol.rs` | v11 messages, `PinSource::Clipboard`, `PinEdit`, `PinInfo` fields |
 | `ui/crates/ui-platform/src/transfer.rs` | `Selection` and the `SelectionReader` trait |
 | `ui/crates/ui-platform-wayland/src/clipboard_host.rs` | `ext_data_control_v1` writing and reading the selection |
-| `apps/crabsnap/ffi/ffmpeg_shim.c`, `shim.rs` | `cs_decode`: demuxer, decoder and `sws_scale` to RGBA or 2-10-10-10, with the stream's colour tags |
+| `apps/crabsnap-platform/unix/ffi/ffmpeg_shim.c`, its crate's `shim.rs` | `cs_decode`: demuxer, decoder and `sws_scale` to RGBA or 2-10-10-10, with the stream's colour tags |
 | `apps/crabsnap/src/ffmpeg/decode.rs`, `capture.rs` | the authority's read side: libraries or program, tags to `ContentColour`, the program's PNG read back |
 | `apps/crabsnap/src/pin.rs`, `pin/content.rs`, `pin/source.rs`, `pin/edit.rs` | pin, content kinds, acquisition, sessions |
 | `apps/crabsnap/src/pin/content/text.rs`, `pin/content/palette.rs`, `pin/content/colour_code.rs`, `pin/ink.rs` | the text family's card, the palette's two blocks, the CSS colour forms, the card's colours |

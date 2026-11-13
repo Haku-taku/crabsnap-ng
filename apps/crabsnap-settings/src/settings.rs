@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crabsnap_core::config::{self, Config};
+use crabsnap_core::config::Config;
 use crabsnap_core::hotkeys::Shortcut;
 use ui_core::Sense;
 use crabsnap_core::protocol::Request;
@@ -49,12 +49,12 @@ fn shortcut_id(name: &'static str) -> Id {
 /// `--save` are the scripted path: apply the values, write the file, tell the daemon, and exit
 /// without a window.
 pub fn run() -> Result<(), String> {
-    let config = Config::load()?;
+    let config = Config::load(&crabsnap_platform::paths::config_path())?;
     if let Some(script) = Script::parse(std::env::args().skip(1))? {
         let mut config = config;
         script.apply(&mut config)?;
         store(&config)?;
-        println!("{}", config::Config::path().display());
+        println!("{}", crabsnap_platform::paths::config_path().display());
         return Ok(());
     }
     // The backend comes first because the window's language list is the system's, and the
@@ -402,7 +402,7 @@ impl Settings {
 /// Write the file, then ask the daemon to re-read it; a daemon that is not running is not an
 /// error, because the file is what it reads next time.
 fn store(config: &Config) -> Result<Option<String>, String> {
-    config.save_to(&config::Config::path())?;
+    config.save_to(&crabsnap_platform::paths::config_path())?;
     let Ok(mut client) = Client::connect() else {
         return Ok(None);
     };
@@ -627,7 +627,7 @@ impl App for Settings {
         ));
 
         let mut note = ui_i18n::Args::new();
-        note.set("path", config::Config::path().display().to_string());
+        note.set("path", crabsnap_platform::paths::config_path().display().to_string());
         let note_text = self.catalog.text_by_id_with("file-note", &note).to_string();
         root = root.child_decl(label("settings/note", Arc::from(note_text), 12.0, muted));
 

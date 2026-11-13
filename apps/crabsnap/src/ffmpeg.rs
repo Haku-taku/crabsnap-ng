@@ -7,13 +7,14 @@
 //! 两条路的分工：库这条路知道编码器的 id、像素格式和 AVOptions；可执行文件只知道它自己的
 //! 命令行，所以用它自己的列表命令回答（`-encoders`、`-h encoder=NAME`）。
 //!
-//! 为什么经 C 而不是 Rust 绑定：见 `ffi/ffmpeg_shim.h`。
+//! 为什么经 C 而不是 Rust 绑定：见 `crabsnap-platform/unix/ffi/ffmpeg_shim.h`。
 
 mod decode;
 mod executable;
-mod shim;
 
 use std::path::Path;
+
+use crabsnap_platform::shim;
 
 use crate::capture::Cropped;
 
@@ -160,9 +161,9 @@ impl Ffmpeg {
                 .unwrap_or_default()
                 .iter()
                 .map(|option| FormatOption {
-                    name: option.name(),
-                    help: option.help(),
-                    default: option.default_text(),
+                    name: option.name().to_string(),
+                    help: option.help().to_string(),
+                    default: option.default_text().to_string(),
                 })
                 .collect(),
             Source::Program(program) => program.options(&format.encoder),
@@ -360,9 +361,9 @@ fn offered_in_libraries(muxers: &[shim::Muxer], encoders: &[shim::Encoder]) -> V
         };
         formats.push(Format {
             extension,
-            encoder: encoder.name(),
+            encoder: encoder.name().to_string(),
             muxer: muxer_for(muxers, extension),
-            description: encoder.long_name(),
+            description: encoder.long_name().to_string(),
         });
     }
     formats
@@ -372,7 +373,7 @@ fn offered_in_libraries(muxers: &[shim::Muxer], encoders: &[shim::Encoder]) -> V
 fn muxer_for(muxers: &[shim::Muxer], extension: &str) -> Option<String> {
     // av_guess_format matches the muxer's name as well as its extensions, and some muxers
     // (qoi) list none.
-    let muxer = muxers.iter().copied().find(|muxer| {
+    let muxer = muxers.iter().find(|muxer| {
         muxer.name().eq_ignore_ascii_case(extension)
             || muxer
                 .extensions()
@@ -392,17 +393,16 @@ fn muxer_for(muxers: &[shim::Muxer], extension: &str) -> Option<String> {
 /// The encoder to ask for: software ones, the still variant before the animation one, and
 /// the `lib*` (external library) builds before ffmpeg's own.
 fn choose_encoder(codec: i32, encoders: &[shim::Encoder]) -> Option<shim::Encoder> {
-    let mut candidates: Vec<shim::Encoder> = encoders
+    let mut candidates: Vec<&shim::Encoder> = encoders
         .iter()
-        .copied()
-        .filter(|encoder| encoder.id() == codec && is_software(&encoder.name()))
+        .filter(|encoder| encoder.id() == codec && is_software(encoder.name()))
         .collect();
     candidates.sort_by(|left, right| {
         let left = left.name();
         let right = right.name();
         (!left.starts_with("lib"), left).cmp(&(!right.starts_with("lib"), right))
     });
-    candidates.into_iter().next()
+    candidates.into_iter().next().cloned()
 }
 
 /// Encoders that need a GPU or a device context, and the animation-only variants.
@@ -434,12 +434,14 @@ mod tests {
 
     #[test]
     fn the_animation_variant_and_hardware_encoders_are_passed_over() {
+        let encoder =
+            |name: &str, codec: i32| shim::Encoder::new(name.into(), String::new(), codec);
         let choose = |names: &[&str], codec: i32| {
             let encoders: Vec<shim::Encoder> = names
                 .iter()
-                .map(|name| shim::Encoder::for_test(name, codec))
+                .map(|name| encoder(name, codec))
                 .collect();
-            choose_encoder(codec, &encoders).map(|encoder| encoder.name())
+            choose_encoder(codec, &encoders).map(|encoder| encoder.name().to_string())
         };
         assert_eq!(
             choose(&["libwebp_anim", "webp"], 61),
@@ -456,12 +458,9 @@ mod tests {
             Some("libwebp".into()),
             "the library build wins over ffmpeg's own"
         );
-        let mixed = [
-            shim::Encoder::for_test("libwebp", 61),
-            shim::Encoder::for_test("mjpeg", 7),
-        ];
+        let mixed = [encoder("libwebp", 61), encoder("mjpeg", 7)];
         assert_eq!(
-            choose_encoder(7, &mixed).map(|encoder| encoder.name()),
+            choose_encoder(7, &mixed).map(|encoder| encoder.name().to_string()),
             Some("mjpeg".into()),
             "an encoder of another codec is not a candidate"
         );

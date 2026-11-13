@@ -22,11 +22,28 @@ use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::WindowsAndMessaging::MONITORINFOF_PRIMARY;
 use windows::core::BOOL;
 
+/// The display connection a grab borrows from the session that opened it.
+///
+/// Windows gives every rung its own device and session, so there is nothing to borrow and this
+/// carries no state; it exists so a grab is opened the same way on both platforms.
+pub struct Session;
+
+impl Session {
+    /// Nothing to take from the backend; the rungs find their own device.
+    pub fn of(_backend: &ui_platform_win32::Win32Backend) -> Result<Self, String> {
+        Ok(Self)
+    }
+}
+
 /// Bind the first capture rung this session offers.
 ///
 /// `pinned` names one rung (`wgc`, `duplication`, `gdi`), so the fallback chain can be
 /// exercised on a machine that offers more than one; `None` and `auto` walk the chain in order.
-pub fn open(pinned: Option<&str>, output: usize) -> Result<Option<Capture>, String> {
+pub fn open(
+    _session: &Session,
+    pinned: Option<&str>,
+    output: usize,
+) -> Result<Option<Capture>, String> {
     let pinned = pinned.unwrap_or_default();
     let allowed = |name: &str| matches!(pinned, "" | "auto") || pinned == name;
     if !matches!(pinned, "" | "auto" | "wgc" | "duplication" | "gdi") {

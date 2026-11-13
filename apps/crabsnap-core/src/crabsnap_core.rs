@@ -3,6 +3,7 @@
 
 pub mod capture;
 pub mod config;
+pub mod ffmpeg;
 pub mod hotkeys;
 pub mod media;
 pub mod paths;

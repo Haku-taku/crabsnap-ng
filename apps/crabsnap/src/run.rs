@@ -10,6 +10,7 @@ use crabsnap_core::media::Kind;
 use crabsnap_core::protocol::{PinInfo, PinOrigin, PinSource, Request, Response};
 use crabsnap_platform::{Client, ClientError};
 use ui_i18n::{Catalog, Language};
+use ui_platform::host::Backend as _;
 
 use crate::cli::{
     CompletionsArgs, InfoArgs, InfoSub, Invocation, OutputArgs, PinSub, ShotArgs, ShotSub, Sub,
@@ -232,13 +233,11 @@ fn pin_locally(
     output: usize,
     language: &Arc<Language>,
 ) -> Result<(), String> {
-    let backend =
-        ui_platform_wayland::WaylandBackend::connect().map_err(|e| format!("wayland: {e}"))?;
-    let link = backend.link().clone();
-    let outputs = link.outputs();
+    let mut backend = ui_host::connect().map_err(|error| format!("the display: {error}"))?;
+    let outputs = backend.outputs();
     let Some(target) = outputs.get(output) else {
         return Err(format!(
-            "this compositor reports {} output(s); there is no output {}",
+            "this display reports {} output(s); there is no output {}",
             outputs.len(),
             output + 1
         ));
@@ -319,8 +318,8 @@ fn print_pin(pin: &PinInfo) {
 fn run_info(info: InfoArgs, no_daemon: bool) -> Result<(), String> {
     match info.command {
         InfoSub::Config => {
-            let path = Config::path();
-            let config = Config::load()?;
+            let path = crabsnap_platform::paths::config_path();
+            let config = Config::load(&path)?;
             println!("{}", path.display());
             println!(
                 "file: {}",
@@ -417,7 +416,7 @@ fn run_info(info: InfoArgs, no_daemon: bool) -> Result<(), String> {
         }
         InfoSub::Formats(formats) => {
             let verbose = formats.verbose;
-            let config = Config::load()?;
+            let config = Config::load(&crabsnap_platform::paths::config_path())?;
             let codecs = crate::codec::Codecs::probe(
                 config.codec.program.as_deref(),
                 config.codec.library_directory.as_deref(),

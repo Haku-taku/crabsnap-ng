@@ -171,18 +171,9 @@ pub struct Shots {
 }
 
 impl Config {
-    /// `$XDG_CONFIG_HOME/crabsnap/config.toml`。
-    pub fn path() -> PathBuf {
-        let base = std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|home| Path::new(&home).join(".config")))
-            .unwrap_or_else(std::env::temp_dir);
-        base.join("crabsnap").join("config.toml")
-    }
-
     /// 读配置；没有文件就是默认值，读不懂则带上路径与原因。
-    pub fn load() -> Result<Config, String> {
-        Self::load_from(&Self::path())
+    pub fn load(path: &Path) -> Result<Config, String> {
+        Self::load_from(path)
     }
 
     /// 写回配置：只动本构建认识的键，其它段落原样保留。

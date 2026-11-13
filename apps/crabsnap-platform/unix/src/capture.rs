@@ -17,7 +17,7 @@ pub mod screencopy;
 use std::time::{Duration, Instant};
 
 use crabsnap_core::capture::{Capture, Frame, PixelFormat};
-use ui_platform_wayland::WaylandLink;
+use ui_platform_wayland::{WaylandBackend, WaylandLink};
 use wayland_client::backend::WaylandError;
 use wayland_client::protocol::wl_output::WlOutput;
 use wayland_client::protocol::wl_shm::Format;
@@ -25,15 +25,31 @@ use wayland_client::{Connection, EventQueue};
 
 use crate::colour::Description;
 
-/// Bind the first capture rung this compositor offers on the app's connection.
+/// The display connection a grab borrows from the session that opened it.
+///
+/// It has to be the loop's own: the loop waits on that connection, so the frame's arrival wakes
+/// the same wait that drives the surfaces, where a connection of the grab's own would only be
+/// read when the loop's next deadline expired.
+#[derive(Clone)]
+pub struct Session(WaylandLink);
+
+impl Session {
+    /// The connection of the backend an app opened through `ui_host::connect`.
+    pub fn of(backend: &WaylandBackend) -> Result<Self, String> {
+        Ok(Self(backend.link().clone()))
+    }
+}
+
+/// Bind the first capture rung this compositor offers on `session`'s connection.
 ///
 /// `pinned` names one rung (`ext`, `screencopy`, `portal`), so the fallback chain can be
 /// exercised on a compositor that offers more than one; `None` walks the chain in order.
 pub fn open(
-    link: &WaylandLink,
+    session: &Session,
     pinned: Option<&str>,
     output: usize,
 ) -> Result<Option<Capture>, String> {
+    let link = &session.0;
     let pinned = pinned.unwrap_or_default();
     let ext = matches!(pinned, "" | "ext");
     let screencopy = matches!(pinned, "" | "screencopy");

@@ -11,6 +11,10 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
+    // The crate is empty off unix: there is no module to link the shim into.
+    if std::env::var_os("CARGO_CFG_UNIX").is_none() {
+        return;
+    }
     for file in [
         "ffi/ffmpeg_shim.c",
         "ffi/ffmpeg_shim.h",

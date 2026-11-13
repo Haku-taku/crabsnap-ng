@@ -11,6 +11,9 @@ path = "src/platform.rs"
 
 [dependencies]
 crabsnap-core = { path = "../../crabsnap-core" }
+
+# The crate is empty off Windows, so these are declarations only a Windows build compiles.
+[target.'cfg(windows)'.dependencies]
 ui-core = { path = "../../../ui/crates/ui-core" }
 ui-platform-win32 = { path = "../../../ui/crates/ui-platform-win32" }
 windows = { version = "0.62", features = [

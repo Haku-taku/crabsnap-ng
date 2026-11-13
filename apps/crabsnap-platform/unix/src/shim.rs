@@ -6,13 +6,15 @@
 use std::ffi::{CString, c_char, c_int, c_long};
 use std::path::Path;
 
+pub use crabsnap_core::ffmpeg::{Colour, Decoded, Encoder, EncoderOption, Muxer, Picture};
+
 const NAME: usize = 32;
 const TEXT: usize = 96;
 const DEFAULT: usize = 72;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct Muxer {
+struct RawMuxer {
     name: [c_char; NAME],
     long_name: [c_char; TEXT],
     extensions: [c_char; TEXT],
@@ -22,7 +24,7 @@ pub struct Muxer {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct Encoder {
+struct RawEncoder {
     name: [c_char; NAME],
     long_name: [c_char; TEXT],
     id: c_int,
@@ -30,7 +32,7 @@ pub struct Encoder {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct EncoderOption {
+struct RawEncoderOption {
     name: [c_char; NAME],
     help: [c_char; TEXT],
     default_text: [c_char; DEFAULT],
@@ -38,11 +40,69 @@ pub struct EncoderOption {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-pub struct Colour {
-    pub primaries: c_int,
-    pub transfer: c_int,
-    pub space: c_int,
-    pub range: c_int,
+struct RawColour {
+    primaries: c_int,
+    transfer: c_int,
+    space: c_int,
+    range: c_int,
+}
+
+impl RawMuxer {
+    const EMPTY: Self = Self {
+        name: [0; NAME],
+        long_name: [0; TEXT],
+        extensions: [0; TEXT],
+        mime: [0; TEXT],
+        video_codec: 0,
+    };
+
+    fn empty(count: usize) -> Vec<Self> {
+        vec![Self::EMPTY; count]
+    }
+}
+
+impl RawEncoder {
+    const EMPTY: Self = Self {
+        name: [0; NAME],
+        long_name: [0; TEXT],
+        id: 0,
+    };
+
+    fn empty(count: usize) -> Vec<Self> {
+        vec![Self::EMPTY; count]
+    }
+}
+
+impl RawEncoderOption {
+    const EMPTY: Self = Self {
+        name: [0; NAME],
+        help: [0; TEXT],
+        default_text: [0; DEFAULT],
+    };
+
+    fn empty(count: usize) -> Vec<Self> {
+        vec![Self::EMPTY; count]
+    }
+}
+
+impl RawColour {
+    fn plain(self) -> Colour {
+        Colour {
+            primaries: self.primaries,
+            transfer: self.transfer,
+            space: self.space,
+            range: self.range,
+        }
+    }
+
+    fn of(colour: Colour) -> Self {
+        Self {
+            primaries: colour.primaries,
+            transfer: colour.transfer,
+            space: colour.space,
+            range: colour.range,
+        }
+    }
 }
 
 /// How the shim packed a decoded picture.
@@ -51,11 +111,11 @@ pub const STORAGE_PACKED10: c_int = 1;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-pub struct RawDecoded {
-    pub width: c_int,
-    pub height: c_int,
-    pub storage: c_int,
-    pub colour: Colour,
+struct RawDecoded {
+    width: c_int,
+    height: c_int,
+    storage: c_int,
+    colour: RawColour,
 }
 
 #[repr(C)]
@@ -65,7 +125,7 @@ struct RawPicture {
     rgba: *const u8,
     pitch: c_long,
     pix_fmt: c_int,
-    colour: Colour,
+    colour: RawColour,
     global_quality: c_int,
     option_names: *const *const c_char,
     option_values: *const *const c_char,
@@ -77,16 +137,16 @@ unsafe extern "C" {
     fn cs_versions() -> *const c_char;
     fn cs_error() -> *const c_char;
     fn cs_reopen(directory: *const c_char);
-    fn cs_muxers(out: *mut Muxer, cap: c_int) -> c_int;
-    fn cs_encoders(out: *mut Encoder, cap: c_int) -> c_int;
-    fn cs_options(encoder: *const c_char, out: *mut EncoderOption, cap: c_int) -> c_int;
+    fn cs_muxers(out: *mut RawMuxer, cap: c_int) -> c_int;
+    fn cs_encoders(out: *mut RawEncoder, cap: c_int) -> c_int;
+    fn cs_options(encoder: *const c_char, out: *mut RawEncoderOption, cap: c_int) -> c_int;
     fn cs_has_option(encoder: *const c_char, name: *const c_char) -> c_int;
     fn cs_pix_fmts(encoder: *const c_char, out: *mut c_int, cap: c_int) -> c_int;
     fn cs_pix_fmt(name: *const c_char) -> c_int;
     fn cs_pix_fmt_name(format: c_int) -> *const c_char;
     fn cs_codec_name(codec: c_int) -> *const c_char;
     fn cs_guess_codec(extension: *const c_char) -> c_int;
-    fn cs_srgb(colour: *mut Colour);
+    fn cs_srgb(colour: *mut RawColour);
     fn cs_encode(
         encoder: *const c_char,
         extension: *const c_char,
@@ -131,11 +191,24 @@ pub fn open() -> Result<String, String> {
 }
 
 pub fn muxers() -> Vec<Muxer> {
-    collect(|out, cap| unsafe { cs_muxers(out, cap) }, Muxer::empty)
+    collect(|out, cap| unsafe { cs_muxers(out, cap) }, RawMuxer::empty)
+        .into_iter()
+        .map(|raw| {
+            Muxer::new(
+                text(&raw.name),
+                text(&raw.long_name),
+                text(&raw.extensions),
+                text(&raw.mime),
+            )
+        })
+        .collect()
 }
 
 pub fn encoders() -> Vec<Encoder> {
-    collect(|out, cap| unsafe { cs_encoders(out, cap) }, Encoder::empty)
+    collect(|out, cap| unsafe { cs_encoders(out, cap) }, RawEncoder::empty)
+        .into_iter()
+        .map(|raw| Encoder::new(text(&raw.name), text(&raw.long_name), raw.id))
+        .collect()
 }
 
 /// The encoder's own options; `None` when there is no such encoder.
@@ -146,10 +219,14 @@ pub fn options(encoder: &str) -> Option<Vec<EncoderOption>> {
     if total < 0 {
         return None;
     }
-    let mut list = EncoderOption::empty(total as usize);
+    let mut list = RawEncoderOption::empty(total as usize);
     // SAFETY: the buffer holds `total` records and the shim fills at most that many.
     unsafe { cs_options(name.as_ptr(), list.as_mut_ptr(), total) };
-    Some(list)
+    Some(
+        list.into_iter()
+            .map(|raw| EncoderOption::new(text(&raw.name), text(&raw.help), text(&raw.default_text)))
+            .collect(),
+    )
 }
 
 /// Whether this encoder takes an option of that name; `None` when there is no such encoder.
@@ -210,25 +287,13 @@ pub fn pix_fmt_name(format: c_int) -> Option<String> {
 
 /// The tags for 8-bit sRGB: BT.709 primaries and matrix, sRGB transfer, full range.
 pub fn srgb() -> Colour {
-    let mut colour = Colour::default();
+    let mut colour = RawColour::default();
     // SAFETY: `colour` is a live record of the layout the shim fills.
     unsafe { cs_srgb(&mut colour) };
-    colour
+    colour.plain()
 }
 
 /// One picture, encoded and muxed into `extension`'s container.
-pub struct Picture<'a> {
-    pub width: i32,
-    pub height: i32,
-    pub rgba: &'a [u8],
-    /// The pixel format to encode in, as a name ("bgra"); `None` lets the shim choose.
-    pub pixel_format: Option<&'a str>,
-    pub colour: Colour,
-    /// An old-style qscale for encoders that only take that; `None` for the encoder default.
-    pub global_quality: Option<i32>,
-    pub options: &'a [(&'a str, &'a str)],
-}
-
 pub fn encode(encoder: &str, extension: &str, picture: &Picture<'_>) -> Result<Vec<u8>, String> {
     let encoder = CString::new(encoder).map_err(|error| error.to_string())?;
     let extension = CString::new(extension).map_err(|error| error.to_string())?;
@@ -254,7 +319,7 @@ pub fn encode(encoder: &str, extension: &str, picture: &Picture<'_>) -> Result<V
         // The picture is top-down RGBA with no padding between rows.
         pitch: c_long::from(picture.width) * 4,
         pix_fmt: picture.pixel_format.map_or(-1, pix_fmt),
-        colour: picture.colour,
+        colour: RawColour::of(picture.colour),
         global_quality: picture.global_quality.unwrap_or(-1),
         option_names: name_pointers.as_ptr(),
         option_values: value_pointers.as_ptr(),
@@ -293,16 +358,6 @@ pub fn encode(encoder: &str, extension: &str, picture: &Picture<'_>) -> Result<V
     // SAFETY: the buffer came from the shim and is released once, here.
     unsafe { cs_free(output) };
     Ok(bytes)
-}
-
-/// One picture read out of a file, or out of bytes already in memory.
-pub struct Decoded {
-    pub width: i32,
-    pub height: i32,
-    /// `true` when the pixels are 2-10-10-10 words rather than 8-bit RGBA.
-    pub ten_bit: bool,
-    pub colour: Colour,
-    pub data: Vec<u8>,
 }
 
 /// Decode the first picture of `bytes`.
@@ -354,7 +409,7 @@ pub fn decode(bytes: &[u8]) -> Result<Decoded, String> {
         width: info.width,
         height: info.height,
         ten_bit,
-        colour: info.colour,
+        colour: info.colour.plain(),
         data: pixels,
     })
 }
@@ -394,96 +449,3 @@ fn text(bytes: &[c_char]) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
-impl Muxer {
-    const EMPTY: Self = Self {
-        name: [0; NAME],
-        long_name: [0; TEXT],
-        extensions: [0; TEXT],
-        mime: [0; TEXT],
-        video_codec: 0,
-    };
-
-    fn empty(count: usize) -> Vec<Self> {
-        vec![Self::EMPTY; count]
-    }
-
-    pub fn name(&self) -> String {
-        text(&self.name)
-    }
-
-    pub fn long_name(&self) -> String {
-        text(&self.long_name)
-    }
-
-    /// The extensions the muxer writes, comma-separated, as libavformat states them.
-    pub fn extensions(&self) -> String {
-        text(&self.extensions)
-    }
-
-    pub fn mime(&self) -> String {
-        text(&self.mime)
-    }
-}
-
-impl Encoder {
-    const EMPTY: Self = Self {
-        name: [0; NAME],
-        long_name: [0; TEXT],
-        id: 0,
-    };
-
-    fn empty(count: usize) -> Vec<Self> {
-        vec![Self::EMPTY; count]
-    }
-
-    pub fn name(&self) -> String {
-        text(&self.name)
-    }
-
-    pub fn long_name(&self) -> String {
-        text(&self.long_name)
-    }
-
-    pub fn id(&self) -> i32 {
-        self.id
-    }
-
-    /// A record with just a name and a codec id, for the encoder-selection tests.
-    #[cfg(test)]
-    pub fn for_test(name: &str, id: i32) -> Self {
-        let mut record = Self::EMPTY;
-        record.id = id;
-        for (slot, byte) in record
-            .name
-            .iter_mut()
-            .zip(name.as_bytes().iter().take(NAME - 1))
-        {
-            *slot = *byte as c_char;
-        }
-        record
-    }
-}
-
-impl EncoderOption {
-    const EMPTY: Self = Self {
-        name: [0; NAME],
-        help: [0; TEXT],
-        default_text: [0; DEFAULT],
-    };
-
-    fn empty(count: usize) -> Vec<Self> {
-        vec![Self::EMPTY; count]
-    }
-
-    pub fn name(&self) -> String {
-        text(&self.name)
-    }
-
-    pub fn help(&self) -> String {
-        text(&self.help)
-    }
-
-    pub fn default_text(&self) -> String {
-        text(&self.default_text)
-    }
-}

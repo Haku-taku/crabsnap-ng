@@ -13,12 +13,14 @@ use ui_core::colour::ContentColour;
 use ui_core::geom::Rect;
 
 fn main() -> Result<(), String> {
+    // A grab borrows nothing on Windows; the session exists so both platforms open alike.
+    let session = capture::Session;
     let mut frames: Vec<(&'static str, Frame)> = Vec::new();
     for rung in crabsnap_platform_win32::CAPTURE_BACKENDS {
         if *rung == "auto" {
             continue;
         }
-        let Some(mut capture) = capture::open(Some(rung), 0)? else {
+        let Some(mut capture) = capture::open(&session, Some(rung), 0)? else {
             println!("{rung}: unavailable");
             continue;
         };
@@ -51,8 +53,8 @@ fn main() -> Result<(), String> {
     compare(&frames);
 
     // The automatic chain must bind the first rung that answers.
-    let mut automatic =
-        capture::open(None, 0)?.ok_or_else(|| "the automatic chain bound nothing".to_string())?;
+    let mut automatic = capture::open(&session, None, 0)?
+        .ok_or_else(|| "the automatic chain bound nothing".to_string())?;
     let frame = automatic.grab(Duration::from_secs(3))?;
     println!(
         "auto: {} at {}x{}",

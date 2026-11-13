@@ -1,10 +1,16 @@
 //! What the app asks of a Unix session: the daemon channel, the user's directories and clock,
 //! and the names of the capture backends this build can be told to use.
+//!
+//! The crate is empty off unix: a socket in the runtime directory, a Wayland grab and a C shim
+//! cannot exist without those calls, so a Windows workspace builds it empty.
+
+#![cfg(unix)]
 
 pub mod capture;
 pub mod channel;
 pub mod colour;
 pub mod paths;
+pub mod shim;
 
 pub use channel::{Client, ClientError, address};
 

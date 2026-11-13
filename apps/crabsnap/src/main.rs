@@ -44,10 +44,9 @@ use ui_core::tree::ImageFit;
 use ui_core::{CursorShape, Id, NodeKind, Sense};
 use ui_i18n::{Language, LanguageChoice};
 use ui_platform::element::Element;
-use ui_platform::host::{Host, OpenOptions};
+use ui_platform::host::{Backend as _, Host, OpenOptions};
 use ui_platform::view::App;
 use ui_platform::window::{Anchor, ExclusiveZone, KeyboardMode, Layer, LayerSpec, SurfaceSpec};
-use ui_platform_wayland::{WaylandBackend, WaylandLink};
 use ui_style::Env;
 use ui_widgets_md3::Md3Kit;
 
@@ -131,7 +130,7 @@ pub(crate) struct Settings {
 
 impl Settings {
     pub(crate) fn load(language: Arc<Language>) -> Result<Arc<Settings>, String> {
-        let config = Config::load()?;
+        let config = Config::load(&crabsnap_platform::paths::config_path())?;
         let codecs = codec::Codecs::probe(
             config.codec.program.as_deref(),
             config.codec.library_directory.as_deref(),
@@ -2350,7 +2349,7 @@ fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // The language must be known before clap renders `--help`. A file that does not load
     // costs only the configured language here; parsing reports it properly afterwards.
-    let config = Config::load().ok();
+    let config = Config::load(&crabsnap_platform::paths::config_path()).ok();
     let choice = language_choice(cli::prescan_lang(&args), config.as_ref())?;
     let language = load_language(choice)?;
     if args.is_empty() {
@@ -2370,7 +2369,7 @@ fn toolbar(language: &Arc<Language>) -> Result<(), String> {
         .ok()
         .and_then(|value| value.parse::<f32>().ok())
         .map(|seconds| start + Duration::from_secs_f32(seconds));
-    let backend = WaylandBackend::connect().map_err(|error| format!("wayland: {error}"))?;
+    let backend = ui_host::connect().map_err(|error| format!("the display: {error}"))?;
     let mut host = Host::new(Box::new(backend));
     host.open(
         SurfaceSpec::layer(
@@ -2452,14 +2451,15 @@ pub(crate) fn load_language(choice: LanguageChoice) -> Result<Arc<Language>, Str
 
 /// What `crabsnap info status` can say today.
 pub(crate) fn status() -> Result<(), String> {
-    let link = WaylandLink::connect().map_err(|e| format!("connect: {e}"))?;
-    let capture = match capture::open(&link, None, 0)? {
+    let mut backend = ui_host::connect().map_err(|error| format!("the display: {error}"))?;
+    let grab = capture::Session::of(&backend)?;
+    let capture = match capture::open(&grab, None, 0)? {
         Some(_) => "ready",
         None => "none",
     };
     println!("capture: {capture}");
     // No daemon means nothing is bound: the plan is what a daemon would bind.
-    let plan = hotkeys::Plan::resolve(&Config::load()?);
+    let plan = hotkeys::Plan::resolve(&Config::load(&crabsnap_platform::paths::config_path())?);
     for action in crabsnap_core::hotkeys::Shortcut::ALL {
         println!(
             "hotkey: {} = {} (not bound: no daemon)",
@@ -2467,7 +2467,7 @@ pub(crate) fn status() -> Result<(), String> {
             plan.describe(action)
         );
     }
-    let outputs = link.outputs();
+    let outputs = backend.outputs();
     if outputs.is_empty() {
         println!("outputs: none reported");
     }
@@ -2496,15 +2496,15 @@ fn shoot_output(
 ) -> Result<(), String> {
     wait_delay(common.delay)?;
     let settings = Settings::load(Arc::clone(language))?;
-    let backend = WaylandBackend::connect().map_err(|e| format!("wayland: {e}"))?;
-    let link = backend.link().clone();
+    let backend = ui_host::connect().map_err(|error| format!("the display: {error}"))?;
+    let grab = capture::Session::of(&backend)?;
     let rung = args
         .backend
         .clone()
         .or_else(|| settings.config.capture.backend.clone());
     let mut grabber =
-        capture::open(&link, rung.as_deref(), args.output.unwrap_or(0) as usize)?
-            .ok_or_else(|| "this compositor offers no screen capture protocol".to_string())?;
+        capture::open(&grab, rung.as_deref(), args.output.unwrap_or(0) as usize)?
+            .ok_or_else(|| "no screen capture backend is available".to_string())?;
     let frame = grabber.grab(Duration::from_secs(2))?;
     let source = frame.output.clone();
     let format = frame.format;
@@ -2591,7 +2591,7 @@ pub(crate) struct Staged {
 
 /// Put a batch of contents on one canvas and run until the pins close.
 pub(crate) fn show_pins(
-    backend: WaylandBackend,
+    backend: ui_host::HostBackend,
     staged: Vec<Staged>,
     screen: (u32, u32),
     dots: f32,
@@ -2679,11 +2679,11 @@ fn shoot_region(
 ) -> Result<(), String> {
     wait_delay(common.delay)?;
     let settings = Settings::load(Arc::clone(language))?;
-    let backend = WaylandBackend::connect().map_err(|e| format!("wayland: {e}"))?;
+    let backend = ui_host::connect().map_err(|error| format!("the display: {error}"))?;
     // The capture runs before the surface exists, on the connection the loop will own.
-    let link = backend.link().clone();
-    let mut grabber = capture::open(&link, settings.config.capture.backend.as_deref(), 0)?
-        .ok_or_else(|| "this compositor offers no screen capture protocol".to_string())?;
+    let grab = capture::Session::of(&backend)?;
+    let mut grabber = capture::open(&grab, settings.config.capture.backend.as_deref(), 0)?
+        .ok_or_else(|| "no screen capture backend is available".to_string())?;
     let frame = grabber.grab(Duration::from_secs(2))?;
     // The screen's name outlives the frame: it is what a saved file says the shot came from.
     let source = frame.output.clone();

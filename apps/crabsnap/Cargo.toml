@@ -6,9 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 description = "Screenshot and pin tool: capture, annotate, pin, on the ui engine."
 
-[build-dependencies]
-cc = "1"
-
 [dependencies]
 clap = { version = "4.6", features = ["derive"] }
 crabsnap-core = { path = "../crabsnap-core" }
@@ -22,20 +19,15 @@ png = "0.18"
 resvg = { version = "0.46", default-features = false, features = ["text", "memmap-fonts"] }
 usvg = { version = "0.46", default-features = false, features = ["text", "memmap-fonts"] }
 fontdb = { version = "0.23", default-features = false, features = ["std", "fs", "memmap"] }
-libc = "0.2"
-wayland-client = "0.31"
-wayland-protocols = { version = "0.32", features = ["client", "staging"] }
-wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 ui-color-hct = { path = "../../ui/crates/ui-color-hct" }
 ui-core = { path = "../../ui/crates/ui-core" }
 ui-design = { path = "../../ui/crates/ui-design" }
 ui-highlight = { path = "../../ui/crates/ui-highlight" }
+ui-host = { path = "../../ui/crates/ui-host" }
 ui-i18n = { path = "../../ui/crates/ui-i18n" }
 ui-paint = { path = "../../ui/crates/ui-paint" }
 ui-platform = { path = "../../ui/crates/ui-platform" }
-ui-platform-wayland = { path = "../../ui/crates/ui-platform-wayland", features = ["gpu", "system-fonts"] }
 ui-richtext = { path = "../../ui/crates/ui-richtext" }
 ui-style = { path = "../../ui/crates/ui-style" }
 ui-widgets = { path = "../../ui/crates/ui-widgets" }
 ui-widgets-md3 = { path = "../../ui/crates/ui-widgets-md3" }
-
