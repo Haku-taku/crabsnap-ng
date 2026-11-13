@@ -11,8 +11,8 @@ Each binary used to resolve the language by itself, and the rules disagreed:
 
 - `apps/crabsnap` read `--lang`, then `CRABSNAP_LANG`, then `[ui] lang`, then
   `LANG`, mapping `LANG` to `zh-CN` or `en` by a prefix test;
-- `apps/crabsnap-settings` read `CRABSNAP_LANG`, then `[ui] lang`, then `LANG`
-  with its own parsing;
+- the settings window — its own binary then, `crabsnap settings` now — read
+  `CRABSNAP_LANG`, then `[ui] lang`, then `LANG` with its own parsing;
 - the gallery read `GALLERY_LOCALE`.
 
 Nothing represented "the language this application is showing". A catalogue was
@@ -153,7 +153,7 @@ into `ui_i18n::LANGUAGE_NAMES`; a locale without one fails the build.
 | `ui/crates/ui-widgets/src/cx.rs` | Resolving the catalogue from the `Env` |
 | `apps/crabsnap-core/src/config.rs` | `[ui] language`, the `lang` alias |
 | `apps/crabsnap/src/main.rs` | The choice, the catalogue, `Settings::language` |
-| `apps/crabsnap-settings/src/settings.rs` | The option group and `set_choice` |
+| `apps/crabsnap/src/settings_window.rs` | The option group and `set_choice` |
 | `ui/crates/ui-gallery/examples/gallery/shell.rs` | `--locale` for screenshots |
 
 ## Verification

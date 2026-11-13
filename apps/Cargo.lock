@@ -467,22 +467,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crabsnap-settings"
-version = "0.1.0"
-dependencies = [
- "crabsnap-core",
- "crabsnap-platform",
- "ui-core",
- "ui-design",
- "ui-host",
- "ui-i18n",
- "ui-platform",
- "ui-style",
- "ui-widgets",
- "ui-widgets-md3",
-]
-
-[[package]]
 name = "crc32fast"
 version = "1.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

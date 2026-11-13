@@ -24,6 +24,7 @@ pub fn run(language: &Arc<Language>, invocation: Invocation) -> Result<(), Strin
         Sub::Info(info) => run_info(info, no_daemon),
         Sub::Completions(args) => run_completions(&language.catalog(), args),
         Sub::Daemon(args) => crate::daemon::run(args.idle, Arc::clone(language)),
+        Sub::Settings(args) => crate::settings_window::run(&args, language),
         Sub::Quit if no_daemon => Err("no daemon is running".into()),
         Sub::Quit => ask(Request::Quit, "asked the daemon to quit"),
         Sub::Reload if no_daemon => Err("no daemon is running".into()),
@@ -45,7 +46,7 @@ fn ask(request: Request, done: &str) -> Result<(), String> {
 }
 
 /// 连上 daemon 发一条请求；没有 daemon 时由调用者决定怎么办。
-fn request(request: Request) -> Result<Option<Response>, String> {
+pub(crate) fn request(request: Request) -> Result<Option<Response>, String> {
     let mut client = match Client::connect() {
         Ok(client) => client,
         Err(ClientError::NoDaemon) => return Ok(None),

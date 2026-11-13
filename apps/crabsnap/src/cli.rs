@@ -7,7 +7,7 @@
 //! crabsnap shot [output|region] [-f PATH] [--pin] [--delay SECS]
 //! crabsnap pin  [add|list|export|close|show|hide|toggle]
 //! crabsnap info [config|formats|status]
-//! crabsnap daemon [--idle SECS] | quit | reload
+//! crabsnap daemon [--idle SECS] | settings | quit | reload
 //! crabsnap completions --shell <SHELL>
 //! ```
 
@@ -44,9 +44,42 @@ pub enum Sub {
     Pin(PinArgs),
     Info(InfoArgs),
     Daemon(DaemonArgs),
+    Settings(SettingsArgs),
     Quit,
     Reload,
     Completions(CompletionsArgs),
+}
+
+/// 设置窗口，以及不开窗时的脚本路径。
+#[derive(Args, Debug, Default)]
+pub struct SettingsArgs {
+    // 写进配置的抓取后端；auto 等于删掉这条覆盖，不给则保留文件里的值。
+    #[arg(long, value_name = "RUNG")]
+    pub backend: Option<String>,
+
+    // 写进配置的保存格式；auto 同上。
+    #[arg(long, value_name = "FORMAT")]
+    pub format: Option<String>,
+
+    // 写进配置的截图目录；空字符串等于清掉这条覆盖。
+    #[arg(long, value_name = "PATH")]
+    pub directory: Option<String>,
+
+    // 写进配置的 ffmpeg 程序路径。
+    #[arg(long, value_name = "PATH")]
+    pub ffmpeg: Option<String>,
+
+    // 写进配置的界面语言：auto 或语言标签。顶层 `--lang` 只影响本次运行。
+    #[arg(long, value_name = "TAG")]
+    pub ui_language: Option<String>,
+
+    // 写进配置的快捷键：动作名=和弦，可重复；和弦为空等于清掉这个动作。
+    #[arg(long, value_name = "NAME=CHORD")]
+    pub shortcut: Vec<String>,
+
+    // 不打开窗口：把上面的值写进文件、通知 daemon，然后退出。
+    #[arg(long)]
+    pub save: bool,
 }
 
 /// 截图：抓哪一块由子命令决定，送到哪由通用选项决定。省略子命令等于 `output`。

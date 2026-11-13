@@ -21,7 +21,7 @@ save, copy, or pin it. The divergence is only where pins live.
 
 **D1 — One service, one connection, many surfaces.** One process owns the
 connection and every surface on it: the overlay, each pin canvas, and the
-settings window in its own binary. What the first version of this decision got
+settings window. What the first version of this decision got
 wrong is where that process sits. A command line cannot hold pins, the clipboard
 or hotkeys after it exits, so the connection lives in a daemon and commands are
 clients of it; a command with no daemon reaches runs the same service locally.

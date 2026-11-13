@@ -17,7 +17,8 @@ platform service on Windows is missing.
 The application is coupled at the same depth. `WaylandBackend::connect()` is
 called directly at six sites: three in `apps/crabsnap/src/main.rs` (`:2374`,
 `:2500`, `:2683`), plus `apps/crabsnap/src/daemon.rs:83`,
-`apps/crabsnap/src/run.rs:236`, and `apps/crabsnap-settings/src/settings.rs:67`.
+`apps/crabsnap/src/run.rs:236`, and `apps/crabsnap-settings/src/settings.rs:67` (a separate
+binary then; the settings window is `apps/crabsnap/src/settings_window.rs` now).
 The capture, colour, hotkey, and daemon modules import Wayland protocol types by
 name. `apps/crabsnap-platform` is a Unix socket client, not the backend
 selector the event-loop page assigns it. A Windows build therefore needs a
@@ -938,7 +939,7 @@ flaky test.
 | Clipboard, drag-and-drop, hotkeys | A copy carries text, HTML, a file list and a picture, each as every Windows format it needs; a paste is text only; hotkeys done through `RegisterHotKey` against a message-only window; drag-and-drop and delayed rendering planned |
 | Named-pipe IPC | Server done: message mode verified by `host_services`, where a client connects, sends one message and reads the answer; a worker's deferred reply is implemented but unexercised |
 | Capture via WGC, Desktop Duplication and BitBlt | Done for a full output, one file per rung behind one trait: Graphics Capture through a free-threaded session, Duplication from a device on the output's adapter, and a GDI blit as the last resort. A float desktop travels as scRGB half floats under `PixelStorage::Float16`, unconverted, so a pin keeps its light above white; only a file's rendition encodes. Rotation and DPI scale are carried on the frame, and the two DXGI rungs agree on one desktop to a mean of 0.04 codes. Rotated displays and window items are unverified, and `WDA_EXCLUDEFROMCAPTURE` is planned |
-| The app on Windows | Builds and runs: `crabsnap` and `crabsnap-settings` compile for Windows with no Wayland dependency, and `ui_host::connect` is the one way in. Verified here: `info status` reports the capture rung and the monitor, `-D shot output` wrote a real 2560x1440 frame, `-D shot region --demo` drew the frozen screen with its selection, readout and toolbar, and the settings window came up. `crabsnap-platform` is a facade over a Unix socket client and a Windows named-pipe client, the save path's known folders and local clock, and the ffmpeg shim — C on Unix, "absent" in Rust on Windows, with a PNG reader as the decode fallback. Not done: the tray icon and the Windows ffmpeg loader |
+| The app on Windows | Builds and runs: `crabsnap` — settings window included, as its `settings` subcommand — compiles for Windows with no Wayland dependency, and `ui_host::connect` is the one way in. Verified here: `info status` reports the capture rung and the monitor, `-D shot output` wrote a real 2560x1440 frame, `-D shot region --demo` drew the frozen screen with its selection, readout and toolbar, and the settings window came up. `crabsnap-platform` is a facade over a Unix socket client and a Windows named-pipe client, the save path's known folders and local clock, and the ffmpeg shim — C on Unix, "absent" in Rust on Windows, with a PNG reader as the decode fallback. Not done: the tray icon and the Windows ffmpeg loader |
 | IME | Composition done through IMM32: open status from the frame's `ImeState`, composition and candidate windows at the caret, preedit and commit as engine events; surrounding text and `DeleteSurrounding` need TSF |
 | Packaging and signing | Planned |
 | Vulkan | Not planned; see [Is Vulkan the right renderer?](#vulkan) |

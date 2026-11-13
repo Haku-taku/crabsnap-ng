@@ -6,18 +6,17 @@ The command surface of the screenshot app, the processes behind it, and the cont
 
 | Binary | Role | Links |
 | --- | --- | --- |
-| `crabsnap` | Command line; runs a command locally, or forwards it to the daemon | portable app logic, `crabsnap-platform` |
-| `crabsnap-settings` | The settings window, a separate process | settings schema, IPC client, UI crates |
+| `crabsnap` | Command line; runs a command locally, or forwards it to the daemon; `crabsnap settings` opens the settings window | portable app logic, `crabsnap-platform`, UI crates |
 | the daemon | `crabsnap daemon`; holds the connection, surfaces, clipboard and hotkeys | `crabsnap-platform` |
 
-There is no separate daemon binary: `crabsnap daemon` hosts the same service as a local command,
-with an IPC listener and an idle policy added. A local command never writes its own loop — it
-uses the host from [the event loop](../engine/event-loop.md).
+There is one binary. The daemon and the settings window are subcommands of it, not programs of
+their own, because both share the app's loop, its catalogs and most of its crates — a second
+binary would link the UI framework twice to save nothing. `crabsnap daemon` hosts the service as
+a local command, with an IPC listener and an idle policy added. A local command never writes its
+own loop — it uses the host from [the event loop](../engine/event-loop.md).
 
-The settings window is its own binary so the main command does not carry its resources. It is
-the only **writer** of the configuration file; the daemon reads it and is told to reload. Both
-are platform-bound at the bottom (a window needs a surface) and share the portable schema and
-protocol types.
+The settings window is the only **writer** of the configuration file; the daemon reads it and is
+told to reload.
 
 It edits the capture backend, the save format and the language as choice rows, the fourteen
 shortcut actions as one text field each, and two free-form values: the shot directory and the
@@ -40,14 +39,17 @@ then `[ui] language`, then the system list, then English.
 A window needs input, so the scripted path exists too:
 
 ```sh
-crabsnap-settings --save --backend ext --format webp --lang zh-CN \
+crabsnap settings --save --backend ext --format webp --ui-language zh-CN \
     --shortcut region=Print --directory /tmp/shots --ffmpeg /usr/bin/ffmpeg
 ```
 
 That applies the values, writes the file, sends `reload` to a running daemon and exits without
-a window — the same code the Save button runs. An empty value (`--directory ''`) is the same as
-clearing the field. `--lang` takes `auto` or a BCP-47 tag and is refused, before the file is
-touched, when it is neither.
+a window — the same code the Save button runs. A flag that is not given leaves the file's value
+alone; an empty one (`--directory ''`) is the same as clearing the field, and `auto` on
+`--backend`, `--format` and `--ui-language` removes the override. `--ui-language` takes `auto`
+or a BCP-47 tag and is refused, before the file is touched, when it is neither. It is not the
+top-level `--lang`: that one only chooses the words of this run, while this one is written into
+the file.
 
 ## Commands
 
@@ -68,6 +70,7 @@ recipes survive.
 | `pin export --id N --file PATH [--format F]` | Write an on-screen pin to a file; the pixels live in the daemon |
 | `info config|formats|status` | Read-only answers; `config` prints the file path, effective values and any ignored keys, `formats` the encodings this machine can write and where each comes from, `status` the outputs, the chosen backend and the hotkeys the daemon bound |
 | `daemon [--idle SECS]` | Host the service |
+| `settings [--save] [--backend RUNG] [--format F] [--directory PATH] [--ffmpeg PATH] [--ui-language TAG] [--shortcut NAME=CHORD]...` | The settings window; `--save` applies the flags to the file instead of opening it |
 | `quit` | Ask the daemon to exit |
 | `reload` | Re-read the configuration and re-probe affected capabilities |
 | `completions --shell SHELL` | Completion script |
@@ -188,7 +191,7 @@ it has no earlier lifetime to inherit.
 
 ## Configuration and hot reload
 
-One schema, one writer. The settings binary edits it; `crabsnap info config` reads it. The file is
+One schema, one writer. The settings window edits it; `crabsnap info config` reads it. The file is
 `$XDG_CONFIG_HOME/crabsnap/config.toml` on a Unix desktop and
 `%APPDATA%\crabsnap\config.toml` on Windows, and a missing file is simply the defaults:
 
@@ -328,6 +331,7 @@ The command surface is in, on the framework host ([event loop](../engine/event-l
 | `shot output [-o N] [--backend RUNG] [-f PATH] [--pin] [--clipboard] [--delay SECS]` | `-o` names the output by its place in the compositor's list and is refused, with the count, when there is no such output; `--pin` attaches the frame to a canvas the size of that output |
 | `shot region [--demo] [--script] [--annotate] [--pin-drag] [--pin-zoom] [--pin-menu] [--pin-raise] [-f PATH] [--delay SECS]` | the probes that used to be environment variables |
 | `info config|formats|status` | `status` reports the capture backend and every output: name, logical size, position, scale and refresh |
+| `settings [--save] [...]` | the window, or with `--save` the same values written to the file and announced to the daemon |
 | `completions --shell SHELL` | generated from the same tree the parser uses |
 | `daemon [--idle SECS]` | the service: one connection, the local channel, the output list, capability probing once at start |
 | `quit` / `reload` | answered over the channel; either prints "no daemon is running" when none is |
@@ -405,6 +409,19 @@ field is not. An empty field now carries the default as supporting text, which i
 or not the field has focus; the placeholder stays for the focused, empty case. Verified in a
 nested session: every untouched field shows its default under it (`Default
 Ctrl+Shift+4; leave it empty for that, commas separate several`).
+
+**The settings window was a second binary, and the split bought nothing.** It was its own crate
+(`apps/crabsnap-settings`) so the main command would not carry its resources, but the window links
+the UI framework, the widget kit and the same engine the app already links: "separate" bought a
+second copy of nearly the same dependency tree, plus a second language resolution and a second
+Fluent catalog that had to agree with the app's. It is `crabsnap settings` now, in
+`apps/crabsnap/src/settings_window.rs`, taking the `Arc<Language>` the app already resolved and
+that one catalog — which is why its keys carry a `settings-` prefix beside the app's `toolbar-`,
+`pin-` and `cli-` ones. The scripted path moved from a private argument parser to clap, and its
+language flag became `--ui-language`: the top-level `--lang` already means "the words of this
+run", and the two are not the same choice. Verified by `--save` writing a file and refusing a bad
+tag before touching it, and by the window opening through the same `Host` every other surface
+uses.
 
 ## See also
 

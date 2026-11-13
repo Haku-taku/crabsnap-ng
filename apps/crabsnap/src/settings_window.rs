@@ -8,12 +8,10 @@ use std::time::{Duration, Instant};
 
 use crabsnap_core::config::Config;
 use crabsnap_core::hotkeys::Shortcut;
-use ui_core::Sense;
-use crabsnap_core::protocol::Request;
-use crabsnap_platform::Client;
+use crabsnap_core::protocol::{Request, Response};
 use ui_core::geom::{Color, Corners, Insets};
 use ui_core::layout::{AxisSize, Grow, SizeClass};
-use ui_core::{Decl, Id, NodeKind};
+use ui_core::{Decl, Id, NodeKind, Sense};
 use ui_design::Appearance;
 use ui_i18n::{Catalog, Language, LanguageChoice};
 use ui_platform::element::Element;
@@ -26,9 +24,6 @@ use ui_widgets::Cx;
 use ui_widgets_md3::{
     ButtonParams, ButtonSize, ButtonStyle, Md3Kit, Md3Options, TextFieldParams, TextFieldVariant,
 };
-
-const EN: &str = include_str!("../locales/en/settings.ftl");
-const ZH_CN: &str = include_str!("../locales/zh-CN/settings.ftl");
 
 /// The capture backends this build offers: a Wayland rung is not a choice on Windows.
 use crabsnap_platform::CAPTURE_BACKENDS as BACKENDS;
@@ -45,30 +40,25 @@ fn shortcut_id(name: &'static str) -> Id {
 
 /// Open the window; `CRABSNAP_SECONDS` still bounds a scripted run.
 ///
-/// `--backend`, `--format`, `--directory`, `--ffmpeg`, `--lang`, `--shortcut NAME=CHORD` and
-/// `--save` are the scripted path: apply the values, write the file, tell the daemon, and exit
-/// without a window.
-pub fn run() -> Result<(), String> {
-    let config = Config::load(&crabsnap_platform::paths::config_path())?;
-    if let Some(script) = Script::parse(std::env::args().skip(1))? {
-        let mut config = config;
-        script.apply(&mut config)?;
+/// The subcommand's flags are the scripted path: with `--save` they apply to the file, the
+/// daemon is told to reload, and no window opens.
+pub(crate) fn run(args: &crate::cli::SettingsArgs, language: &Arc<Language>) -> Result<(), String> {
+    let mut config = Config::load(&crabsnap_platform::paths::config_path())?;
+    if args.save {
+        Script::of(args)?.apply(&mut config)?;
         store(&config)?;
         println!("{}", crabsnap_platform::paths::config_path().display());
         return Ok(());
     }
-    // The backend comes first because the window's language list is the system's, and the
-    // system answers through it: Windows keeps that list in its own settings, not the locale
-    // variables a POSIX session exports.
-    let mut host = Host::new(Box::new(ui_host::connect()?));
-    let language = load_language(&config, &host.languages())?;
+    let backend = ui_host::connect().map_err(|error| format!("the display: {error}"))?;
+    let mut host = Host::new(Box::new(backend));
     let catalog = language.catalog();
-    let title = catalog.text_by_id("title").to_string();
+    let title = catalog.text_by_id("settings-title").to_string();
     let deadline = std::env::var("CRABSNAP_SECONDS")
         .ok()
         .and_then(|value| value.parse::<f32>().ok())
         .map(|seconds| Instant::now() + Duration::from_secs_f32(seconds));
-    let settings = Settings {
+    let window = SettingsWindow {
         shortcuts: Shortcut::ALL
             .iter()
             .map(|action| {
@@ -81,7 +71,7 @@ pub fn run() -> Result<(), String> {
             })
             .collect(),
         choice: language.choice(),
-        language: Arc::clone(&language),
+        language: Arc::clone(language),
         directory: config
             .shots
             .directory
@@ -96,15 +86,18 @@ pub fn run() -> Result<(), String> {
             .unwrap_or_default(),
         config,
         catalog: Arc::clone(&catalog),
-        env: environment(&language),
+        env: environment(language),
         kit: Md3Kit::new(),
         status: None,
         close: false,
     };
     host.open(
         SurfaceSpec::window("dev.crabsnap.settings", title, (640, 740)),
-        settings,
-        OpenOptions::default(),
+        window,
+        OpenOptions {
+            fonts: vec![crate::fonts::icon_face()],
+            ..OpenOptions::default()
+        },
     )?;
     host.run_until(deadline)?;
     Ok(())
@@ -120,21 +113,6 @@ fn environment(language: &Arc<Language>) -> Arc<Env> {
     )
 }
 
-/// The window's language: `[ui] language`, then the system's list.
-///
-/// A configured value that does not parse is skipped, exactly as the other binaries do.
-fn load_language(config: &Config, system: &[String]) -> Result<Arc<Language>, String> {
-    let choice = match config.ui.language.as_deref() {
-        None => LanguageChoice::Auto,
-        Some(tag) => LanguageChoice::parse(tag).unwrap_or_else(|error| {
-            eprintln!("ui.language: {error}; following the system");
-            LanguageChoice::Auto
-        }),
-    };
-    Language::from_sources(choice, system, &[("en", EN), ("zh-CN", ZH_CN)])
-        .map_err(|error| error.to_string())
-}
-
 /// 命令行的脚本路径：不想开窗时用它验证「保存 + 通知 daemon」。
 struct Script {
     backend: Option<Option<String>>,
@@ -146,51 +124,31 @@ struct Script {
 }
 
 impl Script {
-    fn parse(args: impl Iterator<Item = String>) -> Result<Option<Script>, String> {
-        let mut script = Script {
-            backend: None,
-            format: None,
-            directory: None,
-            program: None,
-            lang: None,
-            shortcuts: Vec::new(),
-        };
-        let mut save = false;
-        let mut args = args;
-        while let Some(argument) = args.next() {
-            match argument.as_str() {
-                "--save" => save = true,
-                "--backend" => script.backend = Some(choice(&mut args, BACKENDS, "--backend")?),
-                "--format" => script.format = Some(choice(&mut args, &FORMATS, "--format")?),
-                "--directory" => {
-                    script.directory = Some(free(&mut args, "--directory")?);
-                }
-                "--ffmpeg" => script.program = Some(free(&mut args, "--ffmpeg")?),
-                "--lang" => {
-                    let value = free(&mut args, "--lang")?;
-                    script.lang = Some(
-                        LanguageChoice::parse(&value)
-                            .map_err(|error| format!("--lang: {error}"))?,
-                    );
-                }
-                "--shortcut" => {
-                    let value = free(&mut args, "--shortcut")?;
-                    let (name, chord) = value
-                        .split_once('=')
-                        .ok_or_else(|| format!("--shortcut expects NAME=CHORD, got {value}"))?;
-                    script
-                        .shortcuts
-                        .push((name.trim().to_string(), chord.trim().to_string()));
-                }
-                other => {
-                    return Err(format!(
-                        "unknown argument {other}; expected --backend, --format, --directory, \
-                         --ffmpeg, --lang, --shortcut or --save"
-                    ));
-                }
-            }
-        }
-        Ok(save.then_some(script))
+    /// The flags as clap parsed them; `auto` is the absence of an override, and a flag that
+    /// is not given leaves the file's own value alone.
+    fn of(args: &crate::cli::SettingsArgs) -> Result<Script, String> {
+        Ok(Script {
+            backend: choice(args.backend.as_deref(), BACKENDS, "--backend")?,
+            format: choice(args.format.as_deref(), &FORMATS, "--format")?,
+            directory: args.directory.clone(),
+            program: args.ffmpeg.clone(),
+            lang: match args.ui_language.as_deref() {
+                None => None,
+                Some(value) => Some(
+                    LanguageChoice::parse(value).map_err(|error| format!("--ui-language: {error}"))?,
+                ),
+            },
+            shortcuts: args
+                .shortcut
+                .iter()
+                .map(|value| match value.split_once('=') {
+                    Some((name, chord)) => {
+                        Ok((name.trim().to_string(), chord.trim().to_string()))
+                    }
+                    None => Err(format!("--shortcut expects NAME=CHORD, got {value}")),
+                })
+                .collect::<Result<Vec<_>, String>>()?,
+        })
     }
 
     fn apply(self, config: &mut Config) -> Result<(), String> {
@@ -239,27 +197,26 @@ fn chord_message(catalog: &Catalog, name: &str, text: &str) -> String {
     let mut args = ui_i18n::Args::new();
     args.set("name", name.to_string());
     args.set("chord", text.to_string());
-    catalog.text_by_id_with("bad-chord", &args).to_string()
+    catalog.text_by_id_with("settings-bad-chord", &args).to_string()
 }
 
-/// 一段自由文本；空字符串等于「没有覆盖」，与窗口里清空输入框一致。
-fn free(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<String, String> {
-    args.next().ok_or_else(|| format!("{flag} needs a value"))
-}
-
+/// One flag holding a choice: absent stays absent, `auto` is the absence of an override, and
+/// anything else has to be one this build offers.
 fn choice(
-    args: &mut impl Iterator<Item = String>,
+    value: Option<&str>,
     options: &[&'static str],
     flag: &str,
-) -> Result<Option<String>, String> {
-    let value = args.next().ok_or_else(|| format!("{flag} needs a value"))?;
-    if !options.contains(&value.as_str()) {
+) -> Result<Option<Option<String>>, String> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if !options.contains(&value) {
         return Err(format!("{flag} expects one of {}", options.join(", ")));
     }
-    Ok((value != "auto").then_some(value))
+    Ok(Some((value != "auto").then(|| value.to_string())))
 }
 
-struct Settings {
+struct SettingsWindow {
     /// The free-form values, as the fields hold them; saved into `config` on Save.
     /// One entry per `Shortcut::ALL`, in that order.
     shortcuts: Vec<String>,
@@ -278,7 +235,7 @@ struct Settings {
     close: bool,
 }
 
-impl Settings {
+impl SettingsWindow {
     /// One free-form value: the app owns the buffer, the engine edits it and reports the text.
     fn field(
         &self,
@@ -392,7 +349,7 @@ impl Settings {
         match store(&self.config) {
             Ok(note) => {
                 self.status =
-                    Some(note.unwrap_or_else(|| self.catalog.text_by_id("saved").to_string()));
+                    Some(note.unwrap_or_else(|| self.catalog.text_by_id("settings-saved").to_string()));
             }
             Err(error) => self.status = Some(error),
         }
@@ -403,16 +360,14 @@ impl Settings {
 /// error, because the file is what it reads next time.
 fn store(config: &Config) -> Result<Option<String>, String> {
     config.save_to(&crabsnap_platform::paths::config_path())?;
-    let Ok(mut client) = Client::connect() else {
-        return Ok(None);
-    };
-    match client.request(&Request::Reload) {
-        Ok(_) => Ok(None),
-        Err(error) => Ok(Some(error.message())),
+    match crate::run::request(Request::Reload)? {
+        None | Some(Response::Ok) => Ok(None),
+        Some(Response::Error(error)) => Ok(Some(error)),
+        Some(other) => Ok(Some(format!("unexpected answer: {other:?}"))),
     }
 }
 
-impl App for Settings {
+impl App for SettingsWindow {
     fn changed(&mut self, id: Id, change: ui_core::change::Change) -> bool {
         if let ui_core::change::Change::Text(next) = change {
             if id == Id::str(DIRECTORY_FIELD) {
@@ -495,7 +450,7 @@ impl App for Settings {
             .gap(16.0);
         root = root.child_decl(label(
             "settings/title",
-            self.catalog.text_by_id("title"),
+            self.catalog.text_by_id("settings-title"),
             20.0,
             ink,
         ));
@@ -506,7 +461,7 @@ impl App for Settings {
         ] {
             let heading = self
                 .catalog
-                .text_by_id(&format!("{group}-label"))
+                .text_by_id(&format!("settings-{group}-label"))
                 .to_string();
             root = root.child_decl(label(
                 match group {
@@ -527,7 +482,7 @@ impl App for Settings {
                 };
                 let text = self
                     .catalog
-                    .text_by_id(&format!("{group}-{name}"))
+                    .text_by_id(&format!("settings-{group}-{name}"))
                     .to_string();
                 let params = ButtonParams::new(option_id(group, name), text)
                     .style(if selected {
@@ -544,7 +499,7 @@ impl App for Settings {
 
         // The language item is a choice, not a tag to type: `Auto`, then one button per
         // shipped language, each written in its own script.
-        let heading = self.catalog.text_by_id("lang-label").to_string();
+        let heading = self.catalog.text_by_id("settings-lang-label").to_string();
         root = root.child_decl(label(
             "settings/lang-label",
             Arc::from(heading),
@@ -553,7 +508,7 @@ impl App for Settings {
         ));
         let mut row =
             ui_platform::Container::new(Id::str("settings/lang-row"), NodeKind::Row).gap(8.0);
-        let auto = self.catalog.text_by_id("lang-auto").to_string();
+        let auto = self.catalog.text_by_id("settings-lang-auto").to_string();
         let selected = matches!(self.choice, LanguageChoice::Auto);
         row = row.child(self.option(option_id("lang", "auto"), auto, selected, &mut wcx));
         for (tag, name) in ui_i18n::language_names() {
@@ -568,7 +523,7 @@ impl App for Settings {
         root = root.child(Box::new(row));
         root = root.child_decl(label(
             "settings/shortcuts-label",
-            self.catalog.text_by_id("shortcuts-label"),
+            self.catalog.text_by_id("settings-shortcuts-label"),
             13.0,
             muted,
         ));
@@ -577,13 +532,13 @@ impl App for Settings {
             // knows, and a key that is missing falls back to the schema rather than to blank.
             let label = self
                 .catalog
-                .text_by_id(&format!("shortcut-{}", action.name()))
+                .text_by_id(&format!("settings-shortcut-{}", action.name()))
                 .to_string();
             let mut hint_args = ui_i18n::Args::new();
             hint_args.set("chord", action.default_chords().join(", "));
             let hint = self
                 .catalog
-                .text_by_id_with("shortcut-hint", &hint_args)
+                .text_by_id_with("settings-shortcut-hint", &hint_args)
                 .to_string();
             // The built-in chord is worth reading only while it is the one in effect: an
             // empty field shows it under itself, where it stays readable, and a filled one
@@ -594,7 +549,7 @@ impl App for Settings {
                 .0
                 .get(action.name())
                 .is_some_and(|value| value.trim().is_empty());
-            let cleared_hint = self.catalog.text_by_id("shortcut-cleared");
+            let cleared_hint = self.catalog.text_by_id("settings-shortcut-cleared");
             let mut params = TextFieldParams::new(
                 shortcut_id(action.name()),
                 TextFieldVariant::Outlined,
@@ -613,29 +568,32 @@ impl App for Settings {
         }
         root = root.child(self.catalogued(
             DIRECTORY_FIELD,
-            "directory-label",
-            "directory-hint",
+            "settings-directory-label",
+            "settings-directory-hint",
             &self.directory,
             &mut wcx,
         ));
         root = root.child(self.catalogued(
             PROGRAM_FIELD,
-            "ffmpeg-label",
-            "ffmpeg-hint",
+            "settings-ffmpeg-label",
+            "settings-ffmpeg-hint",
             &self.program,
             &mut wcx,
         ));
 
         let mut note = ui_i18n::Args::new();
         note.set("path", crabsnap_platform::paths::config_path().display().to_string());
-        let note_text = self.catalog.text_by_id_with("file-note", &note).to_string();
+        let note_text = self
+            .catalog
+            .text_by_id_with("settings-file-note", &note)
+            .to_string();
         root = root.child_decl(label("settings/note", Arc::from(note_text), 12.0, muted));
 
         let mut actions =
             ui_platform::Container::new(Id::str("settings/actions"), NodeKind::Row).gap(8.0);
         let save = ButtonParams::new(
             action_id("save"),
-            self.catalog.text_by_id("save").to_string(),
+            self.catalog.text_by_id("settings-save").to_string(),
         )
         .style(ButtonStyle::Filled)
         .size(ButtonSize::Small);
@@ -643,7 +601,7 @@ impl App for Settings {
         actions = actions.child(wcx.element(control));
         let close = ButtonParams::new(
             action_id("close"),
-            self.catalog.text_by_id("close").to_string(),
+            self.catalog.text_by_id("settings-close").to_string(),
         )
         .style(ButtonStyle::Text)
         .size(ButtonSize::Small);

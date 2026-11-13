@@ -7,7 +7,6 @@ members = [
     "crabsnap-platform",
     "crabsnap-platform/unix",
     "crabsnap-platform/win32",
-    "crabsnap-settings",
 ]
 
 [workspace.package]

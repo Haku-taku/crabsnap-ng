@@ -3,8 +3,9 @@
 //! The process owns one compositor connection; every surface — this toolbar, the capture
 //! overlay and the pin canvases — is opened on it.
 //!
-//! Commands: `crabsnap shot output|region`, `crabsnap pin …`, `crabsnap info …`; run
-//! `crabsnap --help` for the tree. With no argument the app shows its toolbar.
+//! Commands: `crabsnap shot output|region`, `crabsnap pin …`, `crabsnap info …`,
+//! `crabsnap settings`; run `crabsnap --help` for the tree. With no argument the app shows its
+//! toolbar.
 //! `CRABSNAP_SECONDS=n` still bounds a scripted run.
 
 mod toolbar;
@@ -23,6 +24,7 @@ mod pin;
 mod pins;
 mod readout;
 mod run;
+mod settings_window;
 mod zoom;
 
 use std::cell::{Cell, RefCell};
