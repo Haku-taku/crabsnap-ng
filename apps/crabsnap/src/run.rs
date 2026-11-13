@@ -268,7 +268,7 @@ fn pin_locally(
     };
     // 坏文件现在就报：贴图已经上屏，用户不该等关掉它们才知道少了哪一张。
     for error in &errors {
-        eprintln!("{error}");
+        log::warn!("{error}");
     }
     if opened.is_empty() {
         return Err(match errors.first() {

@@ -80,7 +80,22 @@ and `--help` work at all, and it happens on every invocation because every invoc
 print. Only the bare launch turns "there is a console" into a decision. The test harness is the
 exception and keeps the console subsystem, since a GUI one has nowhere to print its results. A
 failure on the desktop path has no console to land in: Windows shows a message box, Unix writes
-to stderr, which such a launch discards.
+to stderr, which such a launch discards — which is what the [log](#logs) is for.
+
+## Logs
+
+Every process files its records under the local application data, and prints them to stderr as
+well when it has one: `%LOCALAPPDATA%\crabsnap\logs\` on Windows, `$XDG_STATE_HOME/crabsnap/logs/`
+(`~/.local/state`) on Linux. The file is named for what the process is — `daemon.log`,
+`settings.log`, and `command.log` for everything else — so a report from a desktop launch says
+which part of the tool wrote it.
+
+Records are the `log` crate's, which the engine already reports through; installing a logger in
+the app is what stops the engine's warnings being dropped, and the host's retired-surface and
+unserved-clipboard lines take the same road. A panic goes through it too, because a thread that
+dies on a desktop launch would otherwise leave nothing behind. A file that reaches 1 MiB is
+moved to `.1` before the next record, older generations shift up, and three are kept, so a
+daemon left running for weeks cannot fill the disk.
 
 ## Commands
 
@@ -396,6 +411,18 @@ Help text lives in the app's Fluent catalogs: clap declares the structure, and `
 keys supply every about and help string, so `--lang` switches the whole tree before parsing.
 
 ## Corrections
+
+**A daemon started from the desktop left no trace.** Everything the app reported went to
+`eprintln!`, and a GUI-subsystem binary started by an icon has no stderr handle at all; the
+engine's own `log::warn!` records were worse off, because no logger was installed anywhere, so
+they were dropped even where a console existed. A daemon that exited silently — the failure
+[the event loop](../engine/event-loop.md) now retires a surface for instead of dying — left
+nothing to read afterwards. `diagnostics::install` runs first in `main` and writes each record to
+`%LOCALAPPDATA%\crabsnap\logs\<role>.log` as well as stderr, rotating at 1 MiB with three
+generations kept; the app's stderr calls are `log` records now, so nothing depends on a console
+being present. Caught by `a_full_log_moves_aside_and_keeps_three_generations` for the rotation
+and, for the rest, by reading the file after a run: `crabsnap daemon` followed by a capture
+leaves the start line with its hotkeys in `daemon.log`.
 
 **The encoders do not hand-declare libavcodec's types, and no longer avoid it either.** The
 first version kept PNG in-process and reached JPEG and WebP through libjpeg-turbo and libwebp,

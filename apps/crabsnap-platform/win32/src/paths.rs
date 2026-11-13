@@ -11,7 +11,8 @@ use windows::Win32::Foundation::SYSTEMTIME;
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::Time::SystemTimeToTzSpecificLocalTime;
 use windows::Win32::UI::Shell::{
-    FOLDERID_Pictures, FOLDERID_RoamingAppData, KF_FLAG_DEFAULT, SHGetKnownFolderPath,
+    FOLDERID_LocalAppData, FOLDERID_Pictures, FOLDERID_RoamingAppData, KF_FLAG_DEFAULT,
+    SHGetKnownFolderPath,
 };
 
 pub use crabsnap_core::paths::now_secs;
@@ -40,6 +41,14 @@ pub fn config_path() -> PathBuf {
         .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))
         .unwrap_or_else(std::env::temp_dir);
     crabsnap_core::paths::config_path(&base)
+}
+
+/// Where a process's log goes: the local profile, because a log describes this machine's run.
+pub fn log_dir() -> PathBuf {
+    let base = known_folder(&FOLDERID_LocalAppData)
+        .or_else(|| std::env::var_os("LOCALAPPDATA").map(PathBuf::from))
+        .unwrap_or_else(std::env::temp_dir);
+    crabsnap_core::paths::log_dir(&base)
 }
 
 /// A screenshot's file name, without a directory.

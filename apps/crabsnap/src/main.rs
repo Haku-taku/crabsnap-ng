@@ -19,6 +19,7 @@ mod capture;
 mod cli;
 mod codec;
 mod daemon;
+mod diagnostics;
 mod document;
 mod ffmpeg;
 mod fonts;
@@ -447,7 +448,7 @@ impl Overlay {
             Ok(baked) => Some(baked),
             Err(error) => {
                 // The bare crop is still worth keeping.
-                eprintln!("marks: {error}");
+                log::warn!("marks: {error}");
                 Some(picture)
             }
         }
@@ -461,7 +462,7 @@ impl Overlay {
         match self.jobs.submit(move || cropped.png()) {
             Ok(job) => self.copy_job = Some(job),
             Err(error) => {
-                eprintln!("copy: {error}");
+                log::warn!("copy: {error}");
                 self.notice
                     .show(notice::failed(&self.language.catalog(), notice::Action::Copy));
             }
@@ -491,7 +492,7 @@ impl Overlay {
         match submitted {
             Ok(job) => self.save_job = Some(job),
             Err(error) => {
-                eprintln!("save: {error}");
+                log::warn!("save: {error}");
                 self.notice
                     .show(notice::failed(&self.language.catalog(), notice::Action::Save));
             }
@@ -819,12 +820,12 @@ impl Pin {
                 Ok(payloads) => match payloads.into_iter().next() {
                     Some(payload) => self.pending_copy = Some(payload),
                     None => {
-                        eprintln!("pin copy: nothing to offer");
+                        log::warn!("pin copy: nothing to offer");
                         notice.show(notice::failed(&catalog, notice::Action::Copy));
                     }
                 },
                 Err(error) => {
-                    eprintln!("pin copy: {error}");
+                    log::warn!("pin copy: {error}");
                     notice.show(notice::failed(&catalog, notice::Action::Copy));
                 }
             }
@@ -834,7 +835,7 @@ impl Pin {
             match self.save(&settings) {
                 Ok(path) => notice.show(notice::saved(&self.catalog.catalog(), &path)),
                 Err(error) => {
-                    eprintln!("pin save: {error}");
+                    log::warn!("pin save: {error}");
                     notice.show(notice::failed(
                         &self.catalog.catalog(),
                         notice::Action::Save,
@@ -1884,7 +1885,7 @@ impl App for Overlay {
             match result {
                 Ok(png) => self.pending_copy = Some(png),
                 Err(error) => {
-                    eprintln!("copy: {error}");
+                    log::warn!("copy: {error}");
                     self.notice
                         .show(notice::failed(&catalog, notice::Action::Copy));
                 }
@@ -1895,7 +1896,7 @@ impl App for Overlay {
             match result {
                 Ok(path) => self.notice.show(notice::saved(&catalog, &path)),
                 Err(error) => {
-                    eprintln!("save: {error}");
+                    log::warn!("save: {error}");
                     self.notice
                         .show(notice::failed(&catalog, notice::Action::Save));
                 }
@@ -2309,6 +2310,7 @@ fn main() -> Result<(), String> {
     // either way.
     let terminal = crabsnap_platform::attach_terminal();
     let args: Vec<String> = std::env::args().skip(1).collect();
+    install_diagnostics(&args, terminal);
     // The language must be known before clap renders `--help`. A file that does not load
     // costs only the configured language here; parsing reports it properly afterwards.
     let config = Config::load(&crabsnap_platform::paths::config_path()).ok();
@@ -2329,6 +2331,37 @@ fn main() -> Result<(), String> {
     run::run(&language, invocation)
 }
 
+/// Send this process's records to a file named for what it is.
+///
+/// A launch from the desktop attaches no console, so stderr alone leaves nothing behind —
+/// a daemon that exits without a word is the case this exists for. Which file is decided
+/// from the command, because that is what a reader of a report needs to know.
+fn install_diagnostics(args: &[String], terminal: bool) {
+    let role = match command_word(args) {
+        Some("daemon") => "daemon",
+        Some("settings") => "settings",
+        // The bare launch becomes the daemon when no console asked for the command tree.
+        None if !terminal => "daemon",
+        _ => "command",
+    };
+    diagnostics::install(role, &paths::log_dir());
+}
+
+/// The command line's first word that is not a global option or that option's value.
+fn command_word(args: &[String]) -> Option<&str> {
+    let mut words = args.iter();
+    while let Some(word) = words.next() {
+        match word.as_str() {
+            "--lang" => {
+                words.next();
+            }
+            other if !other.starts_with('-') => return Some(other),
+            _ => {}
+        }
+    }
+    None
+}
+
 /// The language the run uses: `--lang`, then `[ui] language`, then the system list.
 ///
 /// A bad `--lang` is refused, because it was typed on purpose. A configured value that
@@ -2347,7 +2380,7 @@ pub(crate) fn language_choice(
     match LanguageChoice::parse(configured) {
         Ok(choice) => Ok(choice),
         Err(error) => {
-            eprintln!("ui.language: {error}; following the system");
+            log::warn!("ui.language: {error}; following the system");
             Ok(LanguageChoice::Auto)
         }
     }

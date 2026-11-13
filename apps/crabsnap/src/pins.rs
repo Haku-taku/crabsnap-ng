@@ -365,7 +365,7 @@ pub(crate) fn place_pending(
     let pending: Vec<Pin> = outbox.borrow_mut().drain(..).collect();
     for pin in pending {
         if let Err(error) = place(pins, pin, cx) {
-            eprintln!("pin: {error}");
+            log::warn!("pin: {error}");
         }
     }
 }

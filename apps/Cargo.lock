@@ -403,6 +403,7 @@ dependencies = [
  "crabsnap-platform",
  "fontdb",
  "image",
+ "log",
  "png 0.18.1",
  "resvg",
  "ui-color-hct",
@@ -2242,6 +2243,7 @@ dependencies = [
 name = "ui-platform"
 version = "0.1.0"
 dependencies = [
+ "log",
  "math-core",
  "rustc-hash",
  "ui-core",

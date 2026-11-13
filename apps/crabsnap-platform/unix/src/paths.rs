@@ -36,6 +36,18 @@ pub fn config_path() -> PathBuf {
     crabsnap_core::paths::config_path(&base)
 }
 
+/// Where a process's log goes: the XDG state directory, which is the convention for data
+/// that records what happened rather than what the user configured.
+pub fn log_dir() -> PathBuf {
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| Path::new(&home).join(".local").join("state"))
+        })
+        .unwrap_or_else(std::env::temp_dir);
+    crabsnap_core::paths::log_dir(&base)
+}
+
 /// A screenshot's file name, without a directory.
 pub fn shot_name(extension: &str, unix_secs: i64, output: Option<&str>) -> String {
     crabsnap_core::paths::shot_name(extension, &stamp(unix_secs), output)

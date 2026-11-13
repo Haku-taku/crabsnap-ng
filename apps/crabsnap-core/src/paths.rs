@@ -24,6 +24,12 @@ pub fn config_path(base: &Path) -> PathBuf {
     base.join("crabsnap").join("config.toml")
 }
 
+/// Where a process's log lives under `base`: local, not roaming, because it describes this
+/// machine's run and is not worth carrying to another one.
+pub fn log_dir(base: &Path) -> PathBuf {
+    base.join("crabsnap").join("logs")
+}
+
 /// A screenshot's file name, without a directory.
 ///
 /// `output` is the screen the picture came from: with several outputs, two shots in the same

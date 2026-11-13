@@ -163,11 +163,11 @@ host to poll.
 ## When something fails
 
 A surface's `step` is the only place a window's failure reaches the loop, and the loop treats
-it as that surface's own: `turn` drops the failing surface after reporting it on stderr, then
-serves the clipboard, the hotkeys, the tray and the channel for everything else. The surfaces
-share one loop, not one fate — a daemon has no user watching for a window that never redraws,
-and losing the tray and the hotkeys because one swap chain refused a resize is the worse
-outcome.
+it as that surface's own: `turn` drops the failing surface after reporting it through the `log`
+facade, then serves the clipboard, the hotkeys, the tray and the channel for everything else.
+The surfaces share one loop, not one fate — a daemon has no user watching for a window that
+never redraws, and losing the tray and the hotkeys because one swap chain refused a resize is
+the worse outcome.
 
 The backend gets the chance to recover a surface inside `step` before it reports anything. On
 Windows, DXGI's `GetDeviceRemovedReason` keeps answering after the device is gone, so a
@@ -175,8 +175,8 @@ presentation error caused by an adapter removal or a driver reset is answered by
 the device, the renderer and the swap chain and drawing again. A failure that leaves the
 device healthy is reported unchanged: retrying a refused call would only repeat it.
 
-A clipboard the backend cannot serve is reported on stderr and served again on the next turn,
-because a refused write is not a dead connection. `Backend::wait` is the one failure that still
+A clipboard the backend cannot serve is reported the same way and served again on the next
+turn, because a refused write is not a dead connection. `Backend::wait` is the one failure that still
 ends the process: with no wait there is no loop. A command whose surfaces all failed ends the
 way one whose windows were closed does.
 
@@ -293,7 +293,7 @@ device was lost before it reports the failure at all. `Backend::wait` stays fata
 wait means no loop. Caught by `a_failing_surface_is_retired_while_the_others_draw_on` in
 `ui-platform/tests/host_loop.rs`, which fails with the `?` restored. A daemon that vanished
 here around a 100%→125% scale change was never reproduced, so that this branch was its cause
-is `[unverified]`; it was the only path that could exit without a log line.
+is `[unverified]`; it was the only path that could exit without a word.
 
 **A surface opened during a turn waited for unrelated input.** `pump` turned once and then
 blocked, and the turn that opened a surface had already stepped the surfaces before its callback

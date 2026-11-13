@@ -148,7 +148,7 @@ fn start(idle: Option<u64>, language: Arc<Language>, keep_running: bool) -> Resu
             other => Err(format!("{} is not a global action", other.name())),
         };
         if let Err(error) = result {
-            eprintln!("hotkey {}: {error}", action.name());
+            log::error!("hotkey {}: {error}", action.name());
         }
         Effect::None
     });
@@ -184,7 +184,7 @@ fn start(idle: Option<u64>, language: Arc<Language>, keep_running: bool) -> Resu
             }
             TrayEvent::Menu { id } if id == TRAY_SETTINGS => {
                 if let Err(error) = open_settings() {
-                    eprintln!("settings: {error}");
+                    log::warn!("settings: {error}");
                 }
             }
             TrayEvent::Menu { id } if id == TRAY_QUIT => return Effect::Quit,
@@ -216,10 +216,10 @@ fn start(idle: Option<u64>, language: Arc<Language>, keep_running: bool) -> Resu
                 }
                 Some(Ok(frame)) => {
                     if let Err(error) = finish_capture(&mut service, what, frame, cx) {
-                        eprintln!("capture: {error}");
+                        log::error!("capture: {error}");
                     }
                 }
-                Some(Err(error)) => eprintln!("capture: {error}"),
+                Some(Err(error)) => log::error!("capture: {error}"),
             }
         }
         // A palette asked for the colour under a press that found no pin: only this loop
@@ -228,7 +228,7 @@ fn start(idle: Option<u64>, language: Arc<Language>, keep_running: bool) -> Resu
             && let Some(request) = service.pins.take_pick()
             && let Err(error) = start_capture(&mut service, CaptureUse::Pick(request.clone()), cx)
         {
-            eprintln!("pick: {error}");
+            log::warn!("pick: {error}");
             if let Some(surface) = service.pins.picked(&request, None) {
                 let _ = cx.request_frame(surface);
             }
@@ -275,7 +275,7 @@ fn start(idle: Option<u64>, language: Arc<Language>, keep_running: bool) -> Resu
             finish_selection(&mut service, selection, cx);
         }
     });
-    println!("daemon: listening on {address}");
+    log::info!("daemon: listening on {address}");
     host.run()?;
     Ok(())
 }
@@ -287,14 +287,14 @@ fn show_tray(host: &mut Host, language: &Arc<Language>) -> Option<Tray> {
     let icon = match crate::tray_icon::tray_icon() {
         Ok(icon) => icon,
         Err(error) => {
-            eprintln!("tray: {error}");
+            log::warn!("tray: {error}");
             return None;
         }
     };
     let mut tray = match host.tray(icon) {
         Ok(tray) => tray,
         Err(error) => {
-            eprintln!("tray: {error}");
+            log::warn!("tray: {error}");
             return None;
         }
     };
@@ -322,7 +322,7 @@ fn show_tray(host: &mut Host, language: &Arc<Language>) -> Option<Tray> {
 /// 托盘上的一次点击与一次热键做同一件事：在这条连接上抓一帧。
 fn tray_capture(service: &mut Service, what: CaptureUse, cx: &mut MessageCtx<'_>) {
     if let Err(error) = start_capture(service, what, cx) {
-        eprintln!("tray: {error}");
+        log::warn!("tray: {error}");
     }
 }
 
@@ -364,7 +364,7 @@ fn answer(
                 let open = service.pins.surfaces().chain(service.overlay);
                 for surface in open {
                     if let Err(error) = cx.request_frame(surface) {
-                        eprintln!("reload: {error}");
+                        log::warn!("reload: {error}");
                     }
                 }
                 send(reply, Op::Reload, Response::Ok)
@@ -484,7 +484,7 @@ fn bind_hotkeys(service: &mut Service, cx: &mut MessageCtx<'_>) {
     let plan = Plan::resolve(&service.settings.config);
     service.hotkey_lines.clear();
     for problem in &plan.problems {
-        eprintln!("shortcuts: {problem}");
+        log::warn!("shortcuts: {problem}");
     }
     let mut unsupported = false;
     for (action, chord, text) in plan.global_entries() {
@@ -498,7 +498,7 @@ fn bind_hotkeys(service: &mut Service, cx: &mut MessageCtx<'_>) {
             Err(GlobalHotkeyError::Unsupported) => line.push_str(" (unavailable)"),
             Err(error) => line.push_str(&format!(" (failed: {error:?})")),
         }
-        println!("hotkey {line}");
+        log::info!("hotkey {line}");
         service.hotkey_lines.push(line);
     }
     service.hotkeys = plan;
@@ -657,7 +657,7 @@ fn open_overlay(
         },
     )?;
     service.overlay = Some(id);
-    println!("hotkey region: overlay {width}x{height}");
+    log::info!("hotkey region: overlay {width}x{height}");
     Ok(())
 }
 
@@ -673,8 +673,8 @@ fn save_frame(service: &Service, frame: capture::Frame) -> Result<(), String> {
         let full = ui_core::geom::Rect::new(0.0, 0.0, image.width as f32, image.height as f32);
         let cropped = image.crop(full);
         match crate::save_shot(&cropped, source.as_deref(), &settings) {
-            Ok(written) => println!("hotkey output: {written}"),
-            Err(error) => eprintln!("hotkey output: {error}"),
+            Ok(written) => log::info!("hotkey output: {written}"),
+            Err(error) => log::error!("hotkey output: {error}"),
         }
     })?;
     Ok(())
@@ -709,7 +709,7 @@ fn answer_shown(
             if let Some(surface) = surface
                 && let Err(error) = cx.request_frame(surface)
             {
-                eprintln!("pin: cannot redraw its canvas: {error}");
+                log::warn!("pin: cannot redraw its canvas: {error}");
             }
             send(reply, op, Response::Ok)
         }
@@ -860,7 +860,7 @@ fn finish_selection(
     // An owner that closed its pipe produced no selection at all: an empty pin would claim
     // the clipboard held nothing, when the read is what failed.
     if selection.data.is_empty() {
-        eprintln!(
+        log::warn!(
             "pin: the clipboard's {} selection was empty",
             selection.mime
         );
@@ -872,7 +872,7 @@ fn finish_selection(
         let target = match outputs.get(index) {
             Some(target) => target,
             None => {
-                eprintln!(
+                log::warn!(
                     "pin: this display reports {} output(s); there is no output {}",
                     outputs.len(),
                     index + 1
@@ -931,11 +931,11 @@ fn finish_selection(
             Arc::clone(&service.settings),
         );
         if let Err(error) = pins::place(&mut service.pins, pin, cx) {
-            eprintln!("pin: {error}");
+            log::error!("pin: {error}");
         }
     }
     for error in errors {
-        eprintln!("pin: {error}");
+        log::error!("pin: {error}");
     }
 }
 
@@ -945,7 +945,7 @@ fn send(reply: &mut dyn Reply, op: Op, response: Response) -> Effect {
             // 对端已经断开就不必再答；这不是守护进程的错误。
             let _ = reply.send(&bytes);
         }
-        Err(error) => eprintln!("daemon: cannot encode a response: {error}"),
+        Err(error) => log::error!("daemon: cannot encode a response: {error}"),
     }
     Effect::None
 }
