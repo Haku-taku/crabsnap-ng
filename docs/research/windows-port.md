@@ -764,7 +764,7 @@ flaky test.
 
 | Area | Status |
 | --- | --- |
-| Win32 backend, D3D11 presenter | Done: window, input, DPI, clipboard text, theme, `HostSession` trait; see `docs/src/rendering-backends.md` |
+| Win32 backend, D3D11 presenter | Done: window, input, DPI, clipboard text, theme, `HostSession` trait, and the process `Backend` (one pump, several windows, outputs, languages, waker); see `docs/src/rendering-backends.md` |
 | D3D11 renderer | Done |
 | Transparent surfaces and input regions | Planned; `HTTRANSPARENT` across processes is unverified |
 | Clipboard, drag-and-drop, hotkeys | Planned; format mapping is settled, the shell behaviour is not |
@@ -806,8 +806,8 @@ here because the port is where they stop being harmless.
 - `cli.md` says Windows named pipes are not written. This report defines the
   transport; the page should link here instead of restating the gap.
 
-The Status table on `rendering-backends.md` remains accurate today: no
-non-Wayland platform and no Vulkan code exists.
+The Status section on `rendering-backends.md` now names the Win32 window, the
+D3D11 device and the process `Backend` as implemented; Vulkan is still absent.
 
 ## See also
 

@@ -153,6 +153,37 @@ per logical unit: the gallery draws its three control sets, a posted
 frame, an animated page ran at 184 frames per second against a 275 Hz display,
 and an idle page settles to four to six turns a second.
 
+### The Windows process loop
+
+`Win32Backend` implements `ui_platform::host::Backend`, so a multi-surface
+application runs on Windows through the same `Host` as on Wayland. One message
+pump serves the process: a window procedure queues the events of its own window,
+and a surface's turn takes only those, so two windows never read each other's
+input. `wait` is `MsgWaitForMultipleObjectsEx` over an auto-reset event the
+backend hands out as the `Waker`, with the loop's deadline bounded the way the
+window's own wait is. `flush` calls `DwmFlush` once per turn when a surface
+presented, which is the process's single pacing point.
+
+The remaining services are answered from Win32 directly: `outputs` enumerates
+monitors and reports each in logical units with its effective DPI, refresh rate
+and quarter-turn orientation; `system_languages` reads
+`GetUserPreferredUILanguages` under `MUI_LANGUAGE_NAME`; a clipboard copy is
+written whole as `CF_UNICODETEXT`, since Windows has no selection protocol to
+serve under, and a paste request goes back to the asking window.
+
+A surface must say when it owes the next frame. A turn that drew clears the
+driver's own deadline, so `next_deadline` also reports "now" while the engine
+is animating or the last build read the clock; without that the loop slept out
+its poll timeout between frames. Measured with
+`cargo run -p ui-platform-win32 --example two_windows --release`: two windows
+of different sizes, both animating from `cx.now()`, ran 408 frames in 204 turns
+over 3 s, each surface drawing in every turn.
+
+Not implemented on the process loop: the named-pipe `Channel` behind `listen`,
+global hotkeys, and a selection reader for drag-and-drop formats. Each falls
+back to the trait's default, so a `Host` on Windows opens, runs and closes
+surfaces but cannot yet answer an IPC command.
+
 A frame cannot be drawn *during* a modal sizing drag. `DefWindowProcW` runs the
 sizing loop on this thread, so the app loop is blocked inside it until the drag
 ends; DWM stretches the last frame across the growing window, and the first
@@ -484,6 +515,19 @@ between turns, and the loop was asleep until unrelated input woke it. The wait
 is now the caller's timeout capped at one second, with 250 ms when there is
 none — the same bound the Wayland backend carries.
 
+**The Windows host loop slept through an animating surface.** The surface's
+`next_deadline` reported only the driver's deadline, and a turn that drew clears
+that deadline, so a build driven by `cx.now()` left the loop with nothing to
+wake for: it slept out the poll bound between frames. The Wayland path hides
+this, because there the compositor's frame callback is an event on the waited
+descriptor; on Windows nothing arrives after `DwmFlush` returns and the loop
+must be told to come straight back. `Session::next_deadline` now also reports
+"now" while the engine is animating, which is the same flag that makes a
+time-reading control owe the next frame. Caught by
+`cargo run -p ui-platform-win32 --example two_windows --release`: two
+`cx.now()`-driven windows went from 5 turns and 10 frames in 3 s to 204 turns
+and 408 frames, each surface drawing in every turn.
+
 ## Status
 
 Implemented: both presenters, dma-buf zero-copy, explicit sync, HDR targets,
@@ -494,11 +538,14 @@ chain, feeds pointer, keyboard and clipboard events back to the loop, and hosts
 the gallery. Both window backends implement the portable `HostSession` trait, so
 an app's loop is written once and names no backend; the Win32 implementation is
 built and exercised on this machine, the Wayland one is checked by reading each
-delegated signature until it is next built on Linux.
+delegated signature until it is next built on Linux. The Win32 backend also
+implements the process `Backend`, so a `Host` on Windows runs several windows
+from one message pump and answers outputs, languages and the system clipboard.
 
-Not implemented: IME, non-text clipboard formats, layer surfaces and HDR on the
-Windows window, redraw during a modal resize drag; Vulkan. The Windows and
-Vulkan notes in `old/` are surveys, not code.
+Not implemented: on the Windows process loop, the named-pipe channel, global
+hotkeys and a selection reader; on the Windows window, IME, non-text clipboard
+formats, layer surfaces and HDR, and redraw during a modal resize drag; Vulkan.
+The Windows and Vulkan notes in `old/` are surveys, not code.
 
 ## See also
 
