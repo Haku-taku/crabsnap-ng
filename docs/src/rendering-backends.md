@@ -65,9 +65,17 @@ Four API facts shape the code:
 - Device rows grow downward and D3D's viewport grows upward, so the flip lives
   once, in `device_to_ndc`.
 
-`cargo run -p ui-gpu-d3d11 --example d3d11_scene` compiles all eighteen programs
-through d3dcompiler and reads back one 160×120 scene holding a rounded rect, an
-ellipse, a line, a sector and a blurred layer over an opaque backdrop, checking
+`GpuRenderer` holds a `HashMap<ProgramKey, Program>` and builds a program the
+first time a frame draws it, because a surface pays for what it draws and not
+for the rest. The device compiles each program's HLSL once per process into a
+`OnceLock` per `ProgramKey`, so a second surface reuses the bytecode, and the
+presenter starts a worker for the programs its first frame did not draw as soon
+as that frame is on screen (`precompile_remaining`).
+
+`cargo run -p ui-gpu-d3d11 --example d3d11_scene` draws one 160×120 scene
+through d3dcompiler — a rounded rect, an ellipse, a line, a sector and a blurred
+layer over an opaque backdrop, so the programs it needs compile on first use —
+and reads it back, checking
 eight invariants: shape edges land where the primitive says, off-shape pixels
 keep the backdrop, and the layer composite keeps its orientation. It does not
 compare against the GL backend; that needs a Linux run.
@@ -363,6 +371,18 @@ pointer and nothing else, and the first frame after `DuplicateOutput` is empty
 in the desktop's own packing. `grab` skips both until its deadline. The packing
 comes from each frame's own texture, not from `GetDesc` at duplication time,
 which describes the mode rather than what `AcquireNextFrame` hands over.
+
+The app picks a Windows rung at runtime: `apps/crabsnap-platform-win32/src/capture.rs`
+tries Windows Graphics Capture, then Desktop Duplication, then GDI, and the
+`capture.backend` setting pins one of the three. Graphics Capture leads because a
+duplication holds the output exclusively for the length of the grab, which takes
+the desktop away from anything else recording it, while a capture session holds
+nothing and still answers on a still desktop. The session is free-threaded
+(`CreateFreeThreaded`), so it needs no dispatcher queue, sizes its pool for half
+floats when the output composes in advanced colour, and shares the duplication's
+staging readback, so both rungs hand back the same `ScreenFrame`. Opening one in
+release on this machine: 153 ms for the process's first D3D11 device, 59 ms for
+the item, pool and session, and 11 ms more until the first frame is read.
 
 ## CPU path
 
@@ -832,6 +852,37 @@ which pins minification to the level that was written. Caught by zooming a pin
 out in the app: at 0.707 an unpatched build left a 786-pixel band where the
 400x300 image had been, and the patched one drew the whole face at 0.707, 0.59
 and below.
+
+**Every surface compiled nineteen programs before it could show anything.**
+`GpuRenderer::new` built all of them through `D3DCompile` while the presenter
+was opening, though a window that draws shapes, one image and the output pass
+needs none of the glass. Measured in release on Windows 11, 2560x1440 output:
+the presenter took 916 ms to open, of which `GlassKit` cost 346 ms and
+`GlassKitLinear` 367 ms, against 3 to 20 ms for everything else; the screenshot
+overlay's first frame then drew three programs in 26 ms. Programs are now built
+on first use and compiled once per process into a per-key `OnceLock`, so that
+open takes about 24 ms, and the presenter warms the rest on a worker after its
+first frame is presented. The same command end to end — `crabsnap shot region`
+with `CRABSNAP_SECONDS=1`, three runs each — went from 2215-2252 ms to
+1341-1435 ms, and the window's content is on screen about 390 ms after launch
+instead of about 1.3 s. What the remaining time is: the process's first D3D11
+device costs about 153 ms — the runtime and the display driver loading — and the
+capture rung creates it, which is why the presenter's own device then costs 8 ms;
+the capture item, pool and session add 59 ms, and the first frame 11 ms. Nothing
+pins the timing; what covers the lazy path is that `d3d11_scene` and
+`window_scene` build the programs they draw, so a program that stopped building
+fails those examples, and a key a frame never draws is a cost deferred, not a
+program lost.
+
+**The first frame converted a megapixel picture one allocation at a time.**
+`upload_image`'s conversion branch allocated a `Vec` per texel while premultiplying
+and encoding, so a 2560x1440 capture spent 303 ms preparing a texture whose
+actual upload was 7 ms — the dominant cost of the frame that followed it. It now
+writes into one pre-sized buffer, which puts the same conversion at 82 ms; the
+rest is the conversion itself, table lookup and half-float encode per texel.
+Measured in release on the same output. The path stays a full pass because the
+destination's encoding and the source's colour space can differ, and doing it on
+the GPU needs a shader per source/destination pair the scene does not have yet.
 
 ## Status
 
