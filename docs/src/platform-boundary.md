@@ -27,8 +27,10 @@ still builds whatever it declares — and a body without the gate does not build
 
 An application depends on `ui-host`, never on a backend. Its target tables choose the
 backend, its `src/lib.rs` re-exports the choice, and nothing in app code or app manifests
-mentions an OS. That the choice is compile-time is unavoidable: a crate that names Wayland's
-protocols cannot compile on Windows. Capabilities are still decided at runtime.
+mentions an OS. App code calls the backend through `ui_platform::session::HostSession`, the
+trait both `Session`s implement, so even a loop that names no backend type runs on either
+one. That the choice is compile-time is unavoidable: a crate that names Wayland's protocols
+cannot compile on Windows. Capabilities are still decided at runtime.
 
 Everything else is `PORTABLE`: `ui-core`, `ui-color-hct`, `ui-design`,
 `ui-gallery`, `ui-gpu-scene`, `ui-highlight`, `ui-i18n`, `ui-math`, `ui-paint`,

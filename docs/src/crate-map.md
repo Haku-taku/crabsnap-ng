@@ -13,7 +13,7 @@ contract to the lowest crate that can express it.
 | `ui-design` | Semantic design layer plus the three native systems' palettes and tokens | `md3/`, `fluent*`, `hig`, `winui`, `caps` | Platform crates |
 | `ui-i18n` | Fluent catalogs, the generated key table, and language negotiation; `Catalog`, `Language`, `Cx::t` | `build.rs`, `language`, `locales/{en,zh-CN}` | Read `LANG`; the app supplies the choice and the platform's language list |
 | `ui-paint` | Typed primitives, batching, command encoding, the CPU rasterizer (zeno) | `prim`, `batch`, `raster`, `encode` | Platform crates |
-| `ui-platform` | Presentation targets and the CPU window/surface app loop, plus the platform's language list | `driver`, `view`, `present`, `element`, `text_pass`, `state`, `profile`, `locale` | Platform crates |
+| `ui-platform` | Presentation targets, the CPU window/surface app loop, the portable session contract both window backends implement, plus the platform's language list | `driver`, `view`, `present`, `session`, `element`, `text_pass`, `state`, `profile`, `locale` | Platform crates |
 | `ui-style` | Style objects, environment, colour roles, materials, motion, control metrics, capability plumbing | `style`, `env`, `roles`, `material`, `motion`, `capability`, `control_metrics` | Platform crates |
 | `ui-richtext` | The block document model: blocks with source spans, document-level marks and their clipping per block, the Markdown import that fills them, and the conversion of a leaf into runs | `document`, `markdown`, `inline` | Platform crates; render or lay text out |
 | `ui-highlight` | Syntax highlighting over tree-sitter: token classes and byte ranges, one lazily built grammar per language | Platform crates; carry a colour or a theme |
@@ -36,8 +36,8 @@ contract to the lowest crate that can express it.
 | `ui-gpu-d3d11` | The D3D11 device: COM objects, generated HLSL and its constant-buffer layout, DXGI textures and targets; empty off Windows | Be a dependency of a portable crate |
 | `ui-platform-win32` | The Win32 window and its DXGI flip-model swap chain: the `SceneTarget` the engine presents through on Windows, the persistent frame target and the copy into the back buffer, the message pump's input and clipboard, the refresh/scale/theme queries, and the `Session` host | Be a dependency of a portable crate |
 | `ui-platform-wayland` | The Wayland XDG target: protocol glue, `wl_shm` buffers, input, clipboard, presenting | Be a dependency of a portable crate |
-| `ui-host` | The facade an app depends on: target tables pick the window backend and two `pub use` lines re-export it | Contain code, or be a dependency of a portable crate |
-| `ui-demo` | Shared showcase bootstrap for the demo binaries: the faces an app carries, the wallpaper, scripted input — everything but the window and the loop | Be a dependency of a portable crate |
+| `ui-host` | The facade an app depends on: target tables pick the window backend, and two `pub use` lines re-export that `Session` beside the portable `HostSession` trait it implements | Contain code, or be a dependency of a portable crate |
+| `ui-demo` | Shared showcase bootstrap for the demo binaries: the faces an app carries, the wallpaper, scripted input and the frame loop — everything but the window | Be a dependency of a portable crate |
 
 ## Dependency shape
 

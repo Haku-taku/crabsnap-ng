@@ -131,13 +131,23 @@ read on every poll.
 
 `ui-platform-win32::Session` owns window, presenter and driver in that teardown
 order and offers the same `open`/`tick`/`finish` shape as the Wayland session.
-An app does not name either: it depends on `ui-host`, whose target tables choose
-the backend and whose two `pub use` lines re-export `Session`, `SessionOptions`,
-`Tick` and `ThemeWatch` under one name, so the gallery's manifest and source
-mention no OS. What a host can answer and another cannot stays a runtime
-question — the gallery asks its host for a refresh rate, a frame-callback count
-or a dma-buf count, and a host that cannot says so, leaving the number out of the
-report instead of printing a zero. Measured on Windows 11 at 1.25 device pixels
+
+An app is written against `ui_platform::session::HostSession`, the portable
+contract both sessions implement, and against the two DTOs beside it,
+`SessionOptions` and `Tick`: a backend may carry any number of extra methods, but
+what app code calls is the trait. `ui-host` re-exports those three from
+`ui-platform` and only the backend itself — `Session`, `ThemeWatch` — from the
+target tables, so the gallery's manifest and source mention no OS and its run
+loop is generic over `H: HostSession<Gallery>`. Nothing restates a DTO on the
+platform side: two copies of one struct are two contracts that drift apart.
+
+What a host can answer and another cannot stays a runtime question, and the trait
+is where the question is asked — a refresh rate, a frame-callback count, a
+dma-buf count, a process CPU clock. A host without the number returns `None`
+and the report leaves the field out instead of printing a zero; a Win32 session
+answers `true` to `gpu_present` because D3D11 is its only path, and `None` to
+`dmabuf_stats` because a flip-model swap chain holds no dma-buf. Measured on
+Windows 11 at 1.25 device pixels
 per logical unit: the gallery draws its three control sets, a posted
 `WM_LBUTTONDOWN`/`WM_LBUTTONUP` on the MD3 switch flipped it and built the next
 frame, an animated page ran at 184 frames per second against a 275 Hz display,
@@ -481,7 +491,10 @@ offscreen layers, text on both paths, every `DrawList` primitive on both paths,
 fractional scaling, a D3D11 device that renders the whole `DrawList` on
 Windows, and a Win32 window that presents it through a DXGI flip-model swap
 chain, feeds pointer, keyboard and clipboard events back to the loop, and hosts
-the gallery.
+the gallery. Both window backends implement the portable `HostSession` trait, so
+an app's loop is written once and names no backend; the Win32 implementation is
+built and exercised on this machine, the Wayland one is checked by reading each
+delegated signature until it is next built on Linux.
 
 Not implemented: IME, non-text clipboard formats, layer surfaces and HDR on the
 Windows window, redraw during a modal resize drag; Vulkan. The Windows and
