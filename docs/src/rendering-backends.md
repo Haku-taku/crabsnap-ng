@@ -124,8 +124,10 @@ units, named keys and command chords from `WM_KEYDOWN`, text from `WM_CHAR`, and
 divided by the window's DPI so input and layout share logical units. Focus,
 extent and scale changes carry no event of their own and are reported as a
 silent change, which still owes a frame. `WM_PAINT` is validated at once and
-reported the same way, because the frame loop is what paints. The clipboard
-carries `CF_UNICODETEXT`; the app colour scheme comes from
+reported the same way, because the frame loop is what paints. A clipboard copy
+publishes every Windows format its content kind has — `CF_UNICODETEXT`,
+`"HTML Format"`, `CF_HDROP`, and `"PNG"` beside `CF_DIBV5` and `CF_DIB` — and a
+paste still reads text only; the app colour scheme comes from
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme`,
 read on every poll.
 
@@ -168,8 +170,8 @@ The remaining services are answered from Win32 directly: `outputs` enumerates
 monitors and reports each in logical units with its effective DPI, refresh rate
 and quarter-turn orientation; `system_languages` reads
 `GetUserPreferredUILanguages` under `MUI_LANGUAGE_NAME`; a clipboard copy is
-written whole as `CF_UNICODETEXT`, since Windows has no selection protocol to
-serve under, and a paste request goes back to the asking window.
+written whole in every format its content has, since Windows has no selection
+protocol to serve under, and a paste request goes back to the asking window.
 
 A surface must say when it owes the next frame. A turn that drew clears the
 driver's own deadline, so `next_deadline` also reports "now" while the engine
@@ -232,6 +234,20 @@ returned the layer over its one published patch and the window beneath it
 everywhere else in the layer's rectangle, and an all-edge anchor covered the
 monitor exactly.
 
+A copy is published as every format its content kind has, because Windows pastes formats
+and not MIME types: text is `CF_UNICODETEXT`, `text/html` is `"HTML Format"` with four byte
+offsets around a marked fragment, `text/uri-list` is `CF_HDROP` with the `file:` URIs
+percent-decoded into wide paths, and `image/png` is `"PNG"` beside `CF_DIBV5` and `CF_DIB` —
+the formats Explorer, Word and Paint read, built by decoding the PNG, since a DIB is pixels.
+A MIME type with no Windows equivalent is refused rather than invented. A paste is still
+text only, because `Event::Paste` carries a string.
+
+Measured with `cargo run -p ui-platform-win32 --example clipboard`, which reads each block
+back through the shell rather than through the encoder that wrote it: `DragQueryFileW`
+returned `C:\Windows\win.ini` and `C:\a b.txt` from two URIs, the HTML header's offsets
+delimited the fragment and ended at the block's last byte, and a 2x2 picture's `CF_DIBV5`
+and `CF_DIB` both began with its bottom-left pixel as blue, green, red, alpha.
+
 Input methods are IMM32. A frame's `ImeState` opens or closes the input context
 and puts the composition window at the caret, with the candidate list told to
 keep off the caret's own rectangle; both forms take window coordinates.
@@ -251,7 +267,7 @@ with the candidate form excluding the caret's rectangle, and an injected `a😀b
 composition arrived as a preedit of 6 bytes with the caret at its end, which is
 what an injected composition reports.
 
-Not implemented on this path: non-text clipboard formats and HDR.
+Not implemented on this path: HDR.
 
 ### Invariants
 
@@ -649,7 +665,7 @@ publishes. An input method composes through IMM32, with the engine's preedit and
 commit events and the IME windows at the caret.
 
 Not implemented: on the Windows process loop, a selection reader; on the
-Windows window, non-text clipboard formats and HDR, the input method's
+Windows window, HDR, a paste that carries more than text, the input method's
 surrounding text (which needs TSF), and redraw during a modal resize drag;
 Vulkan. The Windows and Vulkan notes in `old/` are surveys, not code.
 

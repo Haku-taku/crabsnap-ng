@@ -478,7 +478,8 @@ injected composition string arrives as a preedit whose cursor is a byte offset.
 
 The engine's clipboard model is MIME-typed content with an owner that serves
 it on demand. Windows is format-typed and the owner is the clipboard itself
-after `SetClipboardData`.
+after `SetClipboardData`, so a copy is written whole, in every format its
+content has.
 
 | Engine content | Windows formats |
 | --- | --- |
@@ -487,18 +488,39 @@ after `SetClipboardData`.
 | `text/uri-list` | `CF_HDROP` with a `DROPFILES` block of wide, double-null-terminated paths |
 | `text/html` | `"HTML Format"` with the header Microsoft applications expect |
 
-The `"PNG"` format alone is not enough. Explorer, Word, and Paint read
-`CF_DIB`; a screenshot copied as PNG only pastes into browsers. The reverse is
-also true: a pin import must accept `CF_DIBV5`, `CF_DIB`, `"PNG"`, and
-`CF_HDROP`, and convert each to the engine's content kind.
+Implemented for all four, in `crates/ui-platform-win32/src/clipboard.rs`. The
+`"PNG"` format alone is not enough: Explorer, Word, and Paint read `CF_DIB`, so
+a picture goes on as all three, and the DIB is built by decoding the PNG — a DIB
+is pixels, and the `image` crate under its `png` feature is the decoder. A DIB
+stores its rows bottom-up and each pixel blue, green, red, alpha; `CF_DIBV5`
+carries the masks and an sRGB colour space, and `CF_DIB` is the older 40-byte
+header as the fallback. The HTML header's four offsets count bytes from the
+block's first byte and straddle the fragment, and the uri-list's `file:` URIs
+are percent-decoded into wide paths, with a non-file URI dropped because the
+format holds no place for it. A MIME type with no Windows equivalent is refused
+rather than given an invented format.
 
-Delayed rendering is how the daemon keeps memory low: it calls
-`SetClipboardData` with a null handle and answers `WM_RENDERFORMAT` when a
-consumer asks. On exit it calls `OleFlushClipboard` after `OleInitialize`, so
-the data survives the daemon, which is the Windows equivalent of the Wayland
-ownership handoff.
+A paste is still text only. `Event::Paste` carries a string, so reading
+`CF_DIBV5`, `CF_DIB`, `"PNG"` and `CF_HDROP` into a pin needs a paste event that
+carries content — the app's import path, not the backend's. The conversion each
+of those four needs is the one above, run backwards.
+
+Nothing here is delayed: `SetClipboardData` hands over the whole block at once,
+so a copy costs its size until something replaces it. Delayed rendering — a null
+handle plus `WM_RENDERFORMAT` — is how the daemon would keep a large capture
+cheap, and `OleFlushClipboard` after `OleInitialize` is how the data would
+survive the daemon on exit; both are planned, and both need the clipboard to be
+owned by a window that outlives the command.
 `AddClipboardFormatListener` and `WM_CLIPBOARDUPDATE` replace the Wayland
-selection event; a message-only window is enough to receive them.
+selection event; a message-only window is enough to receive them, and nothing
+listens yet.
+
+`examples/clipboard.rs` reads every format back through the shell rather than
+through the encoder that wrote it: `DragQueryFileW` returns the two paths, the
+HTML offsets are parsed out of the header, and the DIB headers are read as raw
+little-endian fields. Its four-pixel picture pins the row order and the channel
+order at once — the first pixel in the block is the picture's bottom-left one,
+blue before red.
 
 Drag-and-drop uses `RegisterDragDrop` and `IDropTarget` on the surfaces that
 accept drops. `CF_HDROP` covers files dropped from Explorer; an image dragged
@@ -785,7 +807,7 @@ flaky test.
 | D3D11 renderer | Done |
 | Layer surfaces | Approximated: a `WS_POPUP` tool window on the primary monitor, topmost for `Overlay`/`Top`, placed by anchor, size and margin arithmetic, `WS_EX_NOACTIVATE` for `KeyboardMode::None`, and click-through outside the published input region; `Bottom`/`Background` are not topmost, `Reserve` is ignored, and `FollowPointer` is click-to-focus |
 | Transparent surfaces and input regions | Done for a layer: `HTTRANSPARENT` is verified with `WindowFromPoint` landing on the window below. A translucent capture window is still planned |
-| Clipboard, drag-and-drop, hotkeys | Clipboard text and hotkeys done, the latter through `RegisterHotKey` against a message-only window; drag-and-drop planned |
+| Clipboard, drag-and-drop, hotkeys | A copy carries text, HTML, a file list and a picture, each as every Windows format it needs; a paste is text only; hotkeys done through `RegisterHotKey` against a message-only window; drag-and-drop and delayed rendering planned |
 | Named-pipe IPC | Server done: message mode verified by `host_services`, where a client connects, sends one message and reads the answer; a worker's deferred reply is implemented but unexercised |
 | Capture via WGC and Desktop Duplication | Planned; the HDR path and the border behaviour are unverified |
 | IME | Composition done through IMM32: open status from the frame's `ImeState`, composition and candidate windows at the caret, preedit and commit as engine events; surrounding text and `DeleteSurrounding` need TSF |
@@ -828,8 +850,9 @@ here because the port is where they stop being harmless.
   transport; the page should link here instead of restating the gap.
 
 The Status section on `rendering-backends.md` now names the Win32 window, the
-D3D11 device, the process `Backend`, the layer approximation and the input
-method's composition as implemented; Vulkan is still absent.
+D3D11 device, the process `Backend`, the layer approximation, the input method's
+composition and the clipboard's formats as implemented; Vulkan is still absent,
+and HDR is the part of the port that remains.
 
 ## See also
 
