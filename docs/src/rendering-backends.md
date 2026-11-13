@@ -126,16 +126,24 @@ Wayland surface there is no configure round trip that can withhold a buffer.
 
 Input leaves the window procedure as `ui_core::Event`: cursor motion plus a
 `TrackMouseEvent`-armed leave, the three buttons with `SetCapture` as the
-implicit grab a compositor would give, `WM_MOUSEWHEEL` in notches of 48 logical
-units, named keys and command chords from `WM_KEYDOWN`, text from `WM_CHAR`, and
-`Modifiers` whenever `GetKeyState` disagrees with the last report. Positions are
-divided by the window's DPI so input and layout share logical units. Focus,
-extent and scale changes carry no event of their own and are reported as a
-silent change, which still owes a frame. `WM_PAINT` is validated at once and
-reported the same way, because the frame loop is what paints. A clipboard copy
-publishes every Windows format its content kind has — `CF_UNICODETEXT`,
-`"HTML Format"`, `CF_HDROP`, and `"PNG"` beside `CF_DIBV5` and `CF_DIB` — and a
-paste still reads text only; the app colour scheme comes from
+implicit grab a compositor would give, `WM_MOUSEWHEEL` and `WM_MOUSEHWHEEL` in
+notches of 48 logical units, named keys and command chords from `WM_KEYDOWN`,
+text from `WM_CHAR`, and `Modifiers` whenever `GetKeyState` disagrees with the
+last report. A numeric keypad needs no map of its own: with Num Lock off it
+sends `VK_INSERT`…`VK_DELETE`, which the arrow and Home/End names already cover,
+and with it on `VK_NUMPAD0`…`VK_NUMPAD9`, which arrive as text or as a command
+character. `VK_INSERT`, `VK_PRIOR`, `VK_NEXT` and the media keys stay unnamed
+because the engine has no `Key` for them, on either backend. The two wheel messages do not share a sign: a positive vertical
+notch is away from the user, which scrolls content up, while a positive
+horizontal one is a wheel tilted right, which reveals content to the right — the
+sign Wayland sends. Positions are divided by the window's DPI so input and
+layout share logical units. Focus, extent and scale changes carry no event of
+their own and are reported as a silent change, which still owes a frame.
+`WM_PAINT` is validated at once and reported the same way, because the frame
+loop is what paints. A clipboard copy publishes every Windows format its content
+kind has — `CF_UNICODETEXT`, `"HTML Format"`, `CF_HDROP`, and `"PNG"` beside
+`CF_DIBV5` and `CF_DIB` — and a read turns those back into text, a file list or
+a PNG; the app colour scheme comes from
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme`,
 read on every poll.
 
@@ -980,6 +988,16 @@ foreign host to the local and UNC paths Windows uses. Caught by
 `a_written_dib_reads_back_as_the_same_picture`, watched red on the missing twelve bytes before
 it passed, `a_copied_path_becomes_a_file_uri`, `a_windows_file_uri_names_a_drive_or_a_share`,
 and three live pins from a DIB-only picture, a copied file and copied text.
+
+**A tilted wheel scrolled nothing on Windows.** Only `WM_MOUSEWHEEL` was translated, so a mouse
+with a horizontal wheel, and the two-finger sideways gesture every precision touchpad sends
+through it, produced no event at all and a strip that scrolls sideways could not be moved
+without Shift. Both messages now share one arm of the window procedure and differ only in the
+axis and the sign, which they have to: Microsoft's documentation gives the vertical high word
+"away from the user" and the horizontal one "to the right", and the engine's positive step means
+content moves left or up, so the vertical notch is negated and the horizontal one is not.
+`input_probe` now asks for both steps and names the horizontal one; it printed FAIL with the
+message posted and no arm to take it, and PASS with the arm.
 
 ## Status
 
