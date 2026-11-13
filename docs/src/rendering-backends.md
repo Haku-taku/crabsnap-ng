@@ -232,7 +232,25 @@ returned the layer over its one published patch and the window beneath it
 everywhere else in the layer's rectangle, and an all-edge anchor covered the
 monitor exactly.
 
-Not implemented on this path: IME composition, non-text clipboard formats, and HDR.
+Input methods are IMM32. A frame's `ImeState` opens or closes the input context
+and puts the composition window at the caret with the candidate list below it in
+screen coordinates. `WM_IME_COMPOSITION` is read for two strings: the
+composition becomes `Event::Preedit` and the result becomes `Event::Text`. The
+IME's own composition window is suppressed, because the engine draws the preedit,
+and a secret buffer suppresses the candidate list too. `WM_IME_CHAR` is ignored:
+the result string is the same text in one piece, and the only path that keeps a
+surrogate pair whole. IMM32 has no surrounding text and no way to ask for the
+text around the caret to be deleted, so `ImeState`'s surrounding text and
+`Event::DeleteSurrounding` stay unserved there; both need TSF.
+
+Measured with `cargo run -p ui-platform-win32 --example ime`: an unfocused
+window left the context closed and a caret opened it, a caret 20 by 40 logical
+units placed the composition window at (25, 50) physical on a 1.25-scale monitor
+with the candidate list at its bottom edge in screen coordinates, and an
+injected `a😀b` composition arrived as a preedit of 6 bytes with the caret at
+its end, which is what an injected composition reports.
+
+Not implemented on this path: non-text clipboard formats and HDR.
 
 ### Invariants
 
@@ -611,12 +629,13 @@ from one message pump, answers outputs, languages and the system clipboard, and
 serves a named-pipe channel and global hotkeys. A layer surface opens as a
 topmost, non-activating popup on the primary monitor, placed by the spec's
 anchors, size and margins, and click-through outside the areas its frame
-publishes.
+publishes. An input method composes through IMM32, with the engine's preedit and
+commit events and the IME windows at the caret.
 
 Not implemented: on the Windows process loop, a selection reader; on the
-Windows window, IME, non-text clipboard formats and HDR, and redraw during a
-modal resize drag; Vulkan. The Windows and Vulkan notes in `old/` are surveys,
-not code.
+Windows window, non-text clipboard formats and HDR, the input method's
+surrounding text (which needs TSF), and redraw during a modal resize drag;
+Vulkan. The Windows and Vulkan notes in `old/` are surveys, not code.
 
 ## See also
 

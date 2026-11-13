@@ -441,23 +441,34 @@ in the foreground; the engine already treats a refused warp as legal.
 
 ### IME
 
-IMM32 is the first implementation. The composition window is positioned with
-`ImmSetCompositionWindow` and `ImmSetCandidateWindow` from the caret rectangle
-the engine already publishes through `ImeState`; `WM_IME_STARTCOMPOSITION`,
-`WM_IME_COMPOSITION`, and `WM_IME_ENDCOMPOSITION` fill `Event::Preedit` and
-`Event::DeleteSurrounding`.
+Implemented with IMM32. `set_ime` opens or closes the window's input context
+with `ImmSetOpenStatus` and places the composition and candidate windows from
+the caret rectangle the engine publishes through `ImeState`;
+`WM_IME_STARTCOMPOSITION`, `WM_IME_COMPOSITION` and `WM_IME_ENDCOMPOSITION`
+fill `Event::Preedit` and `Event::Text`. The IME's own composition window is
+suppressed in `WM_IME_SETCONTEXT`, because the engine draws the preedit, and a
+secret buffer suppresses the candidate list as well.
 
-Two corrections are needed. `WM_IME_CHAR` duplicates characters that also
-arrive through `WM_CHAR`; handle one, not both. And `WM_IME_COMPOSITION` with
-`GCS_RESULTSTR` must not be forwarded as both preedit and text.
+Three traps. `WM_IME_CHAR` duplicates characters that also arrive through
+`GCS_RESULTSTR`; the backend reads the result string and ignores `WM_IME_CHAR`,
+which is also the only path that keeps a surrogate pair whole. The composition
+string is UTF-16 with its cursor in code units, so the preedit's byte cursor is
+a separate conversion, and a position inside a surrogate pair snaps forward.
+And a context change sends messages back to the same window procedure, so no
+state may be borrowed while the IMM calls run.
 
-Surrounding text has no IMM32 equivalent. TSF provides it through
-`ITfContext::GetSelection` and the surrounding-text interfaces, which is why
-the IME work is split: IMM32 for composition and candidate placement, TSF later
-for surrounding text and for input scopes on the hidden text fields the
-magnifier uses. The engine's four-thousand-byte cap stays on the engine side.
-The docs already say IME on Windows is not implemented; this is the shape of
-the implementation, not a claim that it is done.
+Surrounding text has no IMM32 equivalent, and neither has
+`Event::DeleteSurrounding`; both stay unserved until TSF. TSF provides them
+through `ITfContext::GetSelection` and the surrounding-text interfaces, which
+is why the work is split: IMM32 for composition and placement, TSF later for
+surrounding text and for input scopes on the hidden text fields the magnifier
+uses. The engine's four-thousand-byte cap stays on the engine side.
+
+`examples/ime.rs` checks what a machine without a language IME can still show:
+the context opens with a caret and closes without one, the composition window
+follows the caret, the candidate list hangs below it in screen coordinates, and
+an injected composition string arrives as a preedit whose cursor is a byte
+offset.
 
 ## Services
 
@@ -693,7 +704,7 @@ ways this design does not yet answer.
 | Presenting without the frame-latency waitable | Dropped frames or a spinning CPU | Wait on `GetFrameLatencyWaitableObject`, as the Wayland path waits on the frame callback |
 | Per-monitor v2 without handling `WM_DPICHANGED` | Blurry or wrongly sized surface after a drag between monitors | Rebuild the swapchain and add full damage |
 | Mixing logical and physical coordinates for pin placement | Pins drift by a few pixels at 125% and 150% | One conversion at the surface boundary; the canvas and the capture use the same monitor DPI |
-| Handling `WM_IME_CHAR` and `WM_CHAR` | Doubled characters with an IME | Handle one source |
+| Handling `WM_IME_CHAR` and `WM_CHAR` | Doubled characters with an IME | Read `GCS_RESULTSTR` and ignore `WM_IME_CHAR`, or the text arrives twice |
 | `RegisterHotKey` on a thread without a message loop | The hotkey never fires | Register on the loop thread and pump |
 | Duplicating an output from the wrong adapter | Black frames on hybrid laptops | Duplicate from the output's own adapter |
 | Not excluding own windows from capture | The overlay appears in the screenshot | `WDA_EXCLUDEFROMCAPTURE` on every own HWND, and capture before opening |
@@ -774,7 +785,7 @@ flaky test.
 | Clipboard, drag-and-drop, hotkeys | Clipboard text and hotkeys done, the latter through `RegisterHotKey` against a message-only window; drag-and-drop planned |
 | Named-pipe IPC | Server done: message mode verified by `host_services`, where a client connects, sends one message and reads the answer; a worker's deferred reply is implemented but unexercised |
 | Capture via WGC and Desktop Duplication | Planned; the HDR path and the border behaviour are unverified |
-| IME | Planned; IMM32 composition only, surrounding text needs TSF |
+| IME | Composition done through IMM32: open status from the frame's `ImeState`, composition and candidate windows at the caret, preedit and commit as engine events; surrounding text and `DeleteSurrounding` need TSF |
 | Packaging and signing | Planned |
 | Vulkan | Not planned; see [Is Vulkan the right renderer?](#vulkan) |
 | Windows 10 support | Unverified; the design targets Windows 11 22H2 and names the Windows 10 2004 API floor where one exists |
@@ -814,8 +825,8 @@ here because the port is where they stop being harmless.
   transport; the page should link here instead of restating the gap.
 
 The Status section on `rendering-backends.md` now names the Win32 window, the
-D3D11 device, the process `Backend` and the layer approximation as implemented;
-Vulkan is still absent.
+D3D11 device, the process `Backend`, the layer approximation and the input
+method's composition as implemented; Vulkan is still absent.
 
 ## See also
 

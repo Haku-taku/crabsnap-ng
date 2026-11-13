@@ -936,10 +936,11 @@ app-requested edits through `Cx::edit_input`, app-requested focus through
 client-side key repeat from the seat's rate and delay, and Fluent with locale
 parity tests.
 
-Not implemented: IME on Windows, macOS, or X11; content purposes beyond a
-secret buffer and a time field; COLR v1 paint graphs and SVG-in-OpenType
-colour; and typing or editing a read-only selection (it is selection and copy
-only).
+Not implemented: IME on macOS or X11; on Windows the IMM32 composition has no
+surrounding text, so `DeleteSurrounding` and a secret field's neighbourhood stay
+unserved there until TSF; content purposes beyond a secret buffer and a time
+field; COLR v1 paint graphs and SVG-in-OpenType colour; and typing or editing a
+read-only selection (it is selection and copy only).
 
 ## See also
 
