@@ -1,11 +1,13 @@
-//! 输出的颜色描述：合成器写进缓冲区的是什么。
+//! What the compositor wrote into the buffer: the output's colour description.
 //!
-//! 描述跟着像素走，不跟着屏幕走：抓到的帧带着它的主色、传递函数与亮度范围，之后无论是显示
-//! 还是存盘，都由绘制端按目标域换算。这里只负责把 `wp_color_manager_v1` 的说法读成一个
-//! [`ContentColour`]，不做任何转换——转换一旦在入口发生，像素就永久损失了原本的幅面。
+//! The description travels with the pixels, not with the screen: a captured frame carries its
+//! primaries, transfer function and luminance range, and whatever draws or saves it converts
+//! for its own destination. This module only reads `wp_color_manager_v1`'s answer into a
+//! [`ContentColour`]; converting here would lose the frame's original range for good.
 //!
-//! 描述读不到、或者编码在这台机器上无法解释时返回 `None`：帧保持未描述，调用方按 sRGB 处理，
-//! 宁可少做，也不假装知道。
+//! A description that cannot be read, or that names an encoding this build cannot map, is
+//! `None`: the frame stays undescribed and the caller treats it as sRGB. Better to do less
+//! than to pretend to know.
 
 use std::time::{Duration, Instant};
 

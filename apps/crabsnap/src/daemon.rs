@@ -44,7 +44,7 @@ struct Service {
     /// 当前那块 overlay；`None` 或已经关掉时，下一次按键才允许再开。
     overlay: Option<SurfaceId>,
     /// 已经请了、还没到的一帧：循环每回合推它一次，而不是在回合里等。
-    pending: Option<(capture::Pending, CaptureUse)>,
+    pending: Option<(Box<dyn capture::Pending>, CaptureUse)>,
     /// 后台工作：复制大图时的解码与编码不该卡住这一轮。
     jobs: ui_platform::jobs::Jobs,
     /// 还在编码的复制，以及它们欠对端的那条应答。
@@ -435,7 +435,7 @@ fn start_capture(
             .unwrap_or(0),
         _ => 0,
     };
-    let Some(to_grab) = capture::Capture::new(
+    let Some(to_grab) = capture::open(
         &service.link,
         service.settings.config.capture.backend.as_deref(),
         output,
@@ -570,7 +570,7 @@ fn save_frame(service: &Service, frame: capture::Frame) -> Result<(), String> {
 
 fn probe(link: &WaylandLink, settings: &Settings) -> Result<String, String> {
     Ok(
-        match capture::Capture::new(link, settings.config.capture.backend.as_deref(), 0)? {
+        match capture::open(link, settings.config.capture.backend.as_deref(), 0)? {
             Some(capture) => capture.name().to_string(),
             None => "none".to_string(),
         },

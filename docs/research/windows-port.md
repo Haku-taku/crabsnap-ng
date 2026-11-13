@@ -641,6 +641,13 @@ implementation changes.
 | Fallback | Desktop Duplication per output | Duplication is a scarce per-output resource; another active duplicator can make it fail with `DXGI_ERROR_NOT_CURRENTLY_AVAILABLE`; access is lost on a mode change |
 | Last resort | GDI `BitBlt` with `CAPTUREBLT` | No HDR, no protected content, slow, and it can miss hardware overlays |
 
+Each rung is one file under `apps/crabsnap-platform/win32/src/capture/` answering the app's
+`Backend` trait: `wgc.rs`, `duplication.rs`, `gdi.rs`. The frame type, its packings and the
+trait are the portable core's, so the Unix rungs use the same three-way split. A fourth API
+sometimes named for this job, `DwmGetDxSharedSurface`, is exported by `dwmapi` ordinal only and
+has no header; Duplication and Graphics Capture supersede it, and the port does not implement
+it.
+
 The app must capture before it opens any overlay, and it must mark every own
 window with `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`. Otherwise a
 monitor capture includes the pins and the toolbar, which is the equivalent of
@@ -661,21 +668,35 @@ Capture. Both arrive in a linear scRGB-like space; the conversion to
 `ContentColour` and to the PNG rendition is the same code the Wayland path
 uses, with the buffer format changed.
 
-The duplication rung is implemented in `ui-platform-win32`: `ScreenCapture` duplicates
-one output from a device on that output's adapter and returns straight RGBA8,
-rotated upright, with the output's name and DPI scale. It asks
-`DuplicateOutput1` for f16 first, and the same clipping trap applies on an auto
-colour managed SDR desktop as on an HDR one: `DuplicateOutput` alone converts
-the composed surface to BGRA8 and everything above roughly 158 in sRGB lands on
-white. Measured here — an SDR-composed ACM panel whose white level reads raw
-3000 (240 nits) — a chart of eight known codes read back exactly through the
-float path and came back as 59 for 32 and 210 for 128 through the 8-bit one.
-The float frame is divided by the white level and encoded to sRGB, so a
-screenshot holds the codes a window drew; light past SDR white clips until the
-engine carries a half-float content colour. Windows draws a highlight border around a
-captured item on screen; it is an overlay, not part of the captured buffer, and
-it is switched off through `GraphicsCaptureSession::IsBorderRequired` on
-Windows 11 22H2 where the app is allowed to change it `[to verify]`.
+Both DXGI rungs are implemented in `ui-platform-win32` and hand back the same `ScreenFrame`:
+straight RGBA8, upright, with the output's name and DPI scale. `ScreenCapture` duplicates one
+output from a device on that output's adapter. It asks `DuplicateOutput1` for f16 first, and
+the same clipping trap applies on an auto colour managed SDR desktop as on an HDR one:
+`DuplicateOutput` alone converts the composed surface to BGRA8 and everything above roughly
+158 in sRGB lands on white. Measured here — an SDR-composed ACM panel whose white level reads
+raw 3000 (240 nits) — a chart of eight known codes read back exactly through the float path
+and came back as 59 for 32 and 210 for 128 through the 8-bit one. The float frame is divided
+by the white level and encoded to sRGB, so a screenshot holds the codes a window drew; light
+past SDR white clips until the engine carries a half-float content colour.
+
+`GraphicsCapture` runs a capture session over the monitor instead: an item from
+`IGraphicsCaptureItemInterop::CreateForMonitor`, a free-threaded frame pool, since a caller
+with no dispatcher queue drains the pool itself, and one frame per grab. The pool is asked for
+`R16G16B16A16Float` when the output reports PQ compositing and for `B8G8R8A8UIntNormalized`
+otherwise, and a null `TryGetNextFrame` — which windows-rs reports as an error carrying `S_OK`
+— is the "nothing yet" answer, not a failure. A fresh session hands over the current desktop
+on a still screen, so one session per grab is enough. The border and pointer are switched off
+through the session's own settings where Windows offers them; the rung's frames agree with the
+duplication's to a mean of 0.01 codes, while the blit's differ by 0.43 and up to 249, which is
+the pointer the blit draws and the two DXGI paths do not.
+
+Measured on this machine at 2560×1440 and 125% for one grab: 356–368 ms through Graphics
+Capture, 172 ms through Duplication, 32–39 ms through BitBlt. Graphics Capture still leads the
+chain, because a duplication holds the output exclusively for the length of the grab and makes
+any other capture tool lose it; a screenshot that costs 190 ms more must not interrupt someone
+else's recording. Two things are `[unverified]`: the half-float pool, because this display
+composes in SDR, and the frame's orientation on a rotated display, because the session path
+rotates nothing while the duplication path turns its image upright.
 
 Window capture needs an item, not the system picker. Graphics Capture creates
 one from an `HWND` through `IGraphicsCaptureItemInterop`, which is what the
@@ -711,8 +732,10 @@ window offers only `auto` where a Wayland one offers the three rungs. The Unix
 client type-checks for Linux and the Windows one is a message-mode named pipe
 scoped to the logon session, where `WaitNamedPipe` with a zero timeout answers
 whether a daemon exists and `CallNamedPipe` carries one request and one answer.
-`crabsnap` itself still names Wayland in its capture, colour, daemon, hotkey and
-tray modules; paths are the first that left it.
+`crabsnap` itself still names Wayland in its daemon, hotkey and tray modules. The frame, its
+packings, the crop and the rung trait have left into `crabsnap-core`, and the platform
+crates own the rungs: the Unix ones are `ext.rs`, `screencopy.rs` and `portal.rs` plus the
+`wp_color_manager_v1` description, and its 2000-line capture file is gone.
 
 The daemon runs as the user, not as a service. It owns the pipe, the clipboard,
 the hotkeys, the tray icon, and the output list, and it creates surfaces on
@@ -868,8 +891,8 @@ flaky test.
 | Transparent surfaces and input regions | Done for a layer: `HTTRANSPARENT` is verified with `WindowFromPoint` landing on the window below. A translucent capture window is still planned |
 | Clipboard, drag-and-drop, hotkeys | A copy carries text, HTML, a file list and a picture, each as every Windows format it needs; a paste is text only; hotkeys done through `RegisterHotKey` against a message-only window; drag-and-drop and delayed rendering planned |
 | Named-pipe IPC | Server done: message mode verified by `host_services`, where a client connects, sends one message and reads the answer; a worker's deferred reply is implemented but unexercised |
-| Capture via WGC and Desktop Duplication | Desktop Duplication done: one named or primary output, from a device on its adapter, f16 composed surface converted to SDR sRGB, rotation and DPI scale carried on the frame; verified against a chart of known codes on an auto colour managed desktop. HDR highlights clip, several outputs are not assembled, and WGC, the border behaviour and `WDA_EXCLUDEFROMCAPTURE` are planned |
-| The app on Windows | Started: `ui_host::connect` and `Host::languages` give an app one way in, the settings window builds and runs here and offers only the capture backends its build has, and `crabsnap-platform` is a facade over a Unix socket client and a Windows named-pipe client plus the save path's known folders and local clock. `crabsnap` itself still names Wayland in capture, colour, daemon, hotkeys and tray; the tray and the ffmpeg shim are unstarted |
+| Capture via WGC, Desktop Duplication and BitBlt | Done for a full output, one file per rung behind one trait: Graphics Capture through a free-threaded session, Duplication from a device on the output's adapter with the f16 composed surface converted to SDR sRGB, and a GDI blit as the last resort. Rotation and DPI scale are carried on the frame; the duplication path was verified against a chart of known codes on an auto colour managed desktop, and the three rungs agree on one desktop to a mean of 0.5 codes. HDR highlights clip, the session's float pool and rotated displays are unverified, window items and `WDA_EXCLUDEFROMCAPTURE` are planned |
+| The app on Windows | Started: `ui_host::connect` and `Host::languages` give an app one way in, the settings window builds and runs here and offers only the capture backends its build has, and `crabsnap-platform` is a facade over a Unix socket client and a Windows named-pipe client plus the save path's known folders and local clock. The capture frame and the rung trait live in `crabsnap-core`, and each platform crate has its own rungs; `crabsnap` itself still names Wayland in daemon, hotkeys and tray, and the tray and the ffmpeg shim are unstarted |
 | IME | Composition done through IMM32: open status from the frame's `ImeState`, composition and candidate windows at the caret, preedit and commit as engine events; surrounding text and `DeleteSurrounding` need TSF |
 | Packaging and signing | Planned |
 | Vulkan | Not planned; see [Is Vulkan the right renderer?](#vulkan) |

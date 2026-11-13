@@ -423,7 +423,6 @@ dependencies = [
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-wlr",
- "zbus",
 ]
 
 [[package]]
@@ -431,8 +430,10 @@ name = "crabsnap-core"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "png 0.18.1",
  "serde",
  "toml",
+ "ui-core",
 ]
 
 [[package]]
@@ -448,8 +449,15 @@ name = "crabsnap-platform-unix"
 version = "0.1.0"
 dependencies = [
  "crabsnap-core",
+ "image",
  "libc",
  "rustix",
+ "ui-core",
+ "ui-platform-wayland",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
+ "zbus",
 ]
 
 [[package]]
@@ -457,6 +465,8 @@ name = "crabsnap-platform-win32"
 version = "0.1.0"
 dependencies = [
  "crabsnap-core",
+ "ui-core",
+ "ui-platform-win32",
  "windows",
 ]
 

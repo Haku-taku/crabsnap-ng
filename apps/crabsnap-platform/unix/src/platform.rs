@@ -1,7 +1,9 @@
 //! What the app asks of a Unix session: the daemon channel, the user's directories and clock,
 //! and the names of the capture backends this build can be told to use.
 
+pub mod capture;
 pub mod channel;
+pub mod colour;
 pub mod paths;
 
 pub use channel::{Client, ClientError, address};

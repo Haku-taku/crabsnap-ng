@@ -11,7 +11,6 @@ mod toolbar;
 mod capture;
 mod cli;
 mod codec;
-mod color;
 mod daemon;
 mod document;
 mod ffmpeg;
@@ -2454,7 +2453,7 @@ pub(crate) fn load_language(choice: LanguageChoice) -> Result<Arc<Language>, Str
 /// What `crabsnap info status` can say today.
 pub(crate) fn status() -> Result<(), String> {
     let link = WaylandLink::connect().map_err(|e| format!("connect: {e}"))?;
-    let capture = match capture::Capture::new(&link, None, 0)? {
+    let capture = match capture::open(&link, None, 0)? {
         Some(_) => "ready",
         None => "none",
     };
@@ -2504,7 +2503,7 @@ fn shoot_output(
         .clone()
         .or_else(|| settings.config.capture.backend.clone());
     let mut grabber =
-        capture::Capture::new(&link, rung.as_deref(), args.output.unwrap_or(0) as usize)?
+        capture::open(&link, rung.as_deref(), args.output.unwrap_or(0) as usize)?
             .ok_or_else(|| "this compositor offers no screen capture protocol".to_string())?;
     let frame = grabber.grab(Duration::from_secs(2))?;
     let source = frame.output.clone();
@@ -2683,7 +2682,7 @@ fn shoot_region(
     let backend = WaylandBackend::connect().map_err(|e| format!("wayland: {e}"))?;
     // The capture runs before the surface exists, on the connection the loop will own.
     let link = backend.link().clone();
-    let mut grabber = capture::Capture::new(&link, settings.config.capture.backend.as_deref(), 0)?
+    let mut grabber = capture::open(&link, settings.config.capture.backend.as_deref(), 0)?
         .ok_or_else(|| "this compositor offers no screen capture protocol".to_string())?;
     let frame = grabber.grab(Duration::from_secs(2))?;
     // The screen's name outlives the frame: it is what a saved file says the shot came from.

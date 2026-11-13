@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::capture::{Cropped, POINT_DPI};
+use crate::capture::{Cropped, density, pixels_per_metre};
 use crate::ffmpeg::{Ffmpeg, Format};
 
 /// 一个能写出的文件格式：就是它的后缀。
@@ -368,16 +368,6 @@ fn with_tiff_density(mut tiff: Vec<u8>, dpi: u32) -> Vec<u8> {
     tiff
 }
 
-/// 一逻辑点等于 96 dpi，与屏幕给出的 scale 相乘就是这个文件该声明的密度。
-fn density(scale: f32) -> u32 {
-    (scale.max(0.01) * POINT_DPI).round() as u32
-}
-
-/// `pHYs` 数的是每米像素，不是每英寸。
-fn pixels_per_metre(dpi: u32) -> u32 {
-    (dpi as f32 / 0.0254).round().max(1.0) as u32
-}
-
 /// 给 JPEG 补一段 JFIF APP0，带上密度。
 ///
 /// 格式规定 APP0 紧跟 SOI，所以插在第二个字节之后；已经有 APP0 的文件保留它自己的说法。
@@ -395,34 +385,6 @@ fn with_jfif_density(mut jpeg: Vec<u8>, dpi: u32) -> Vec<u8> {
     header.extend_from_slice(&[0x00, 0x00]);
     jpeg.splice(2..2, header);
     jpeg
-}
-
-impl Cropped {
-    /// The region as a PNG, for a file or for the clipboard.
-    pub fn png(&self) -> Result<Vec<u8>, String> {
-        let rgba = self.rendition();
-        let per_metre = pixels_per_metre(density(self.scale));
-        let mut bytes = Vec::new();
-        let mut encoder = png::Encoder::new(&mut bytes, self.width, self.height);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        // pHYs is the PNG density field: pixels per metre, the same fact a viewer reads to
-        // show the picture at the size the screen gave it.
-        encoder.set_pixel_dims(Some(png::PixelDimensions {
-            xppu: per_metre,
-            yppu: per_metre,
-            unit: png::Unit::Meter,
-        }));
-        {
-            let mut writer = encoder
-                .write_header()
-                .map_err(|error| format!("encode PNG: {error}"))?;
-            writer
-                .write_image_data(&rgba)
-                .map_err(|error| format!("encode PNG: {error}"))?;
-        }
-        Ok(bytes)
-    }
 }
 
 #[cfg(test)]
