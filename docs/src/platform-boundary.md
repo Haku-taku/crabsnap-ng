@@ -13,7 +13,7 @@ add a backend, and where the test does not look.
 | Crate | Reason in the test |
 | --- | --- |
 | `ui-platform-wayland` | Wayland window backend: `wayland-client`, `libc`, `xkbcommon` |
-| `ui-demo` | Showcase bootstrap: opens a Wayland window and exits the process |
+| `ui-demo` | Showcase bootstrap: opens a window through the host facade and exits the process |
 | `ui-gpu-egl` | EGL device + GBM + dma-buf: unix fds, `libc`, `libgbm` |
 | `ui-gpu-d3d11` | D3D11 device: COM, DXGI and d3dcompiler are Win32 APIs, and the crate is empty off Windows |
 | `ui-platform-win32` | Win32 window, input and DXGI swap chain: user32 and dxgi are Windows APIs, and the crate is empty off Windows |

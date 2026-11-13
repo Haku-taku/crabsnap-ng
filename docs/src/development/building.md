@@ -76,8 +76,9 @@ about fonts.
   workspace unbuildable on the other OS.
 - An app names `ui-host`, never a backend: its target tables choose one and two `pub use`
   lines re-export it, so an app's manifest and source mention no OS.
-- `ui-demo` and the two demo front-ends that boot through it are unix-only until that
-  bootstrap is rebuilt on `ui-host::Session`; on Windows they build and print a message.
+- `ui-demo` is a configuration layer over `ui-host`: the faces an app carries, the wallpaper,
+  and the scripted-input knobs. Opening the window, choosing the presenter and pacing the loop
+  belong to the host, so every demo front-end runs wherever `ui-host` has a backend.
 
 ## Clippy
 

@@ -47,9 +47,7 @@ cargo build --workspace --tests --examples
 lifetime (default 300). Use `--release` for anything judged by eye or by
 speed.
 
-`gallery` runs on any backend `ui-host` provides, Wayland or Win32.
-`winui_gallery` and the Glass showcase still boot through `ui-demo`, which is
-Wayland-only; on Windows they build and print that instead of opening a window.
+All three run on any backend `ui-host` provides, Wayland or Win32.
 
 > **Warning:** Do not run a graphical test in your own session. It takes the
 > compositor you are working in. Use the

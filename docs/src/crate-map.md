@@ -37,7 +37,7 @@ contract to the lowest crate that can express it.
 | `ui-platform-win32` | The Win32 window and its DXGI flip-model swap chain: the `SceneTarget` the engine presents through on Windows, the persistent frame target and the copy into the back buffer, the message pump's input and clipboard, the refresh/scale/theme queries, and the `Session` host | Be a dependency of a portable crate |
 | `ui-platform-wayland` | The Wayland XDG target: protocol glue, `wl_shm` buffers, input, clipboard, presenting | Be a dependency of a portable crate |
 | `ui-host` | The facade an app depends on: target tables pick the window backend and two `pub use` lines re-export it | Contain code, or be a dependency of a portable crate |
-| `ui-demo` | Shared showcase bootstrap for the demo binaries: window, presenter, bundled faces, loop | Be a dependency of a portable crate |
+| `ui-demo` | Shared showcase bootstrap for the demo binaries: the faces an app carries, the wallpaper, scripted input — everything but the window and the loop | Be a dependency of a portable crate |
 
 ## Dependency shape
 
@@ -65,7 +65,7 @@ Read each line as "depends on". There are no other internal edges.
 | `ui-widgets-md3` | `ui-core`, `ui-design`, `ui-style`, `ui-widgets`, `ui-i18n` |
 | `ui-widgets-fluent` | `ui-core`, `ui-design`, `ui-platform`, `ui-style`, `ui-widgets` |
 | `ui-widgets-glass` | `ui-core`, `ui-design`, `ui-style`, `ui-widgets` |
-| `ui-demo` | `ui-core`, `ui-platform`, `ui-platform-wayland` |
+| `ui-demo` | `ui-core`, `ui-platform`, `ui-host` |
 | `ui-gallery` | All of the above; through `ui-host` as its only window dependency, examples only |
 
 `ui-core` is the hinge: it depends on nothing else in the workspace, and nearly
