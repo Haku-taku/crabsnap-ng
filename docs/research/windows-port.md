@@ -754,9 +754,11 @@ Built and run on Windows: `info status` reports `capture: ready` and the monitor
 scale, `-D shot output -f out.png` wrote a 2560x1440 frame of the real desktop and the file
 was looked at, `-D shot region --demo` drew the frozen screen, the selection and its readout
 and toolbar, and the settings window came up with the system's Chinese catalogue. The
-toolbar of a bare `crabsnap` run renders too, read back from its own window. Two gaps stay
-open: the icons draw as empty boxes because Material Symbols is a system font this repo
-does not bundle and no Windows machine has it, and the tray icon is unstarted.
+toolbar of a bare `crabsnap` run renders too, read back from its own window. The icons
+first drew as empty boxes: Material Symbols is a system font on a Linux desktop and
+nothing on Windows. `crabsnap` now ships the variable Outlined face and hands it to each
+surface through `OpenOptions::fonts`, so the toolbar's glyphs draw on either platform.
+What stays open is the tray icon.
 
 The daemon runs as the user, not as a service. It owns the pipe, the clipboard,
 the hotkeys, the tray icon, and the output list, and it creates surfaces on
@@ -936,7 +938,7 @@ flaky test.
 | Clipboard, drag-and-drop, hotkeys | A copy carries text, HTML, a file list and a picture, each as every Windows format it needs; a paste is text only; hotkeys done through `RegisterHotKey` against a message-only window; drag-and-drop and delayed rendering planned |
 | Named-pipe IPC | Server done: message mode verified by `host_services`, where a client connects, sends one message and reads the answer; a worker's deferred reply is implemented but unexercised |
 | Capture via WGC, Desktop Duplication and BitBlt | Done for a full output, one file per rung behind one trait: Graphics Capture through a free-threaded session, Duplication from a device on the output's adapter, and a GDI blit as the last resort. A float desktop travels as scRGB half floats under `PixelStorage::Float16`, unconverted, so a pin keeps its light above white; only a file's rendition encodes. Rotation and DPI scale are carried on the frame, and the two DXGI rungs agree on one desktop to a mean of 0.04 codes. Rotated displays and window items are unverified, and `WDA_EXCLUDEFROMCAPTURE` is planned |
-| The app on Windows | Builds and runs: `crabsnap` and `crabsnap-settings` compile for Windows with no Wayland dependency, and `ui_host::connect` is the one way in. Verified here: `info status` reports the capture rung and the monitor, `-D shot output` wrote a real 2560x1440 frame, `-D shot region --demo` drew the frozen screen with its selection, readout and toolbar, and the settings window came up. `crabsnap-platform` is a facade over a Unix socket client and a Windows named-pipe client, the save path's known folders and local clock, and the ffmpeg shim — C on Unix, "absent" in Rust on Windows, with a PNG reader as the decode fallback. Not done: the tray icon, the Material Symbols font the toolbar icons need, and the Windows ffmpeg loader |
+| The app on Windows | Builds and runs: `crabsnap` and `crabsnap-settings` compile for Windows with no Wayland dependency, and `ui_host::connect` is the one way in. Verified here: `info status` reports the capture rung and the monitor, `-D shot output` wrote a real 2560x1440 frame, `-D shot region --demo` drew the frozen screen with its selection, readout and toolbar, and the settings window came up. `crabsnap-platform` is a facade over a Unix socket client and a Windows named-pipe client, the save path's known folders and local clock, and the ffmpeg shim — C on Unix, "absent" in Rust on Windows, with a PNG reader as the decode fallback. Not done: the tray icon and the Windows ffmpeg loader |
 | IME | Composition done through IMM32: open status from the frame's `ImeState`, composition and candidate windows at the caret, preedit and commit as engine events; surrounding text and `DeleteSurrounding` need TSF |
 | Packaging and signing | Planned |
 | Vulkan | Not planned; see [Is Vulkan the right renderer?](#vulkan) |

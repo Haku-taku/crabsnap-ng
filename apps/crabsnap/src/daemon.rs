@@ -527,6 +527,7 @@ fn open_overlay(
         Box::new(overlay),
         OpenOptions {
             uncapped: false,
+            fonts: vec![crate::fonts::icon_face()],
             images: vec![ImageEntry {
                 id: FROZEN_TEXTURE,
                 width,

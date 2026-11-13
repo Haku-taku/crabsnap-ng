@@ -14,6 +14,7 @@ mod codec;
 mod daemon;
 mod document;
 mod ffmpeg;
+mod fonts;
 mod hotkeys;
 mod loupe;
 mod notice;
@@ -2392,7 +2393,10 @@ fn toolbar(language: &Arc<Language>) -> Result<(), String> {
         Toolbar {
             language: Arc::clone(language),
         },
-        OpenOptions::default(),
+        OpenOptions {
+            fonts: vec![fonts::icon_face()],
+            ..OpenOptions::default()
+        },
     )?;
     let stats = host.run_until(deadline)?;
     println!("crabsnap: {} frames in {} turns", stats.frames, stats.turns);
@@ -2633,6 +2637,7 @@ pub(crate) fn show_pins(
             uncapped: false,
             images: entries,
             shortcuts: settings.shortcuts.chords(crabsnap_core::hotkeys::Place::Pin),
+            fonts: vec![fonts::icon_face()],
         },
     )?;
     let start = Instant::now();
@@ -2727,6 +2732,7 @@ fn shoot_region(
         overlay,
         OpenOptions {
             uncapped: false,
+            fonts: vec![fonts::icon_face()],
             images: vec![ImageEntry {
                 id: FROZEN_TEXTURE,
                 width,

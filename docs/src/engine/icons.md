@@ -79,6 +79,12 @@ application depends on the system having the font installed. Register once at
 startup, before the first frame; the provider enumerates the system stack
 separately.
 
+An app that opens its surfaces through `Host` does not hold a loop to register
+on: it declares the faces in `OpenOptions::fonts`, and the backend registers
+them on the surface's loop before the first frame. `crabsnap` ships the
+Material Symbols variable face that way, under `IconSet::Outlined`'s family
+name, because no Windows machine has it installed.
+
 ## When not to use a glyph
 
 Morphing icons — a FAB's plus rotating into a close mark — stay hand-drawn.

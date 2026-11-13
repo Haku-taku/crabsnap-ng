@@ -345,6 +345,7 @@ pub(crate) fn place(
             uncapped: false,
             images: entry.into_iter().collect(),
             shortcuts: pins.shortcuts.clone(),
+            fonts: vec![crate::fonts::icon_face()],
         },
     )?;
     let index = pins.open(output, board);
