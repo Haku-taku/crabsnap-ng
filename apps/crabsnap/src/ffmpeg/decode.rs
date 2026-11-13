@@ -38,18 +38,18 @@ impl Ffmpeg {
             Source::Program(program) => {
                 // The program answers in PNG, so it can only hand back 8-bit sRGB.
                 let png = program.decode(bytes)?;
-                let (width, height, data) = crate::capture::read_png(&png)?;
+                let picture = crate::capture::read_png(&png)?;
                 Ok(Decoded {
-                    width,
-                    height,
-                    data: Arc::new(data),
-                    colour: ContentColour::SDR,
+                    width: picture.width,
+                    height: picture.height,
+                    data: Arc::new(picture.data),
+                    colour: picture.colour,
                 })
             }
-            // PNG is the one format this build writes itself, so its own reader is what it can
-            // always go back to; it is 8-bit sRGB, which is what this build writes.
+            // PNG is the one format this build reads and writes itself, so that reader is
+            // what it can always go back to — including a 16-bit PQ one it saved itself.
             Source::None => {
-                let (width, height, data) = crate::capture::read_png(bytes).map_err(|error| {
+                let picture = crate::capture::read_png(bytes).map_err(|error| {
                     format!(
                         "cannot read this picture: {error}; {}",
                         self.failure()
@@ -57,10 +57,10 @@ impl Ffmpeg {
                     )
                 })?;
                 Ok(Decoded {
-                    width,
-                    height,
-                    data: Arc::new(data),
-                    colour: ContentColour::SDR,
+                    width: picture.width,
+                    height: picture.height,
+                    data: Arc::new(picture.data),
+                    colour: picture.colour,
                 })
             }
         }

@@ -239,6 +239,13 @@ a file measures only when it is written. A file written from a picture above
 the destination's white now gets `bt2390`; below it the curve is skipped and the
 rendition is a plain conversion. Display always uses the destination's curve.
 
+A file destination can also keep the light instead of rolling it. An HDR picture is written as
+PQ codes over BT.2020, whose peak is the container's 10000 nits, so the curve has nothing left
+to do; the app picks that destination when the measured peak is above the display's own white,
+and a desktop whose brightest pixel *is* that white stays in sRGB codes, where white means the
+viewer's white. Reading such a file back is the same placement run backwards, into the scRGB
+light a capture of an HDR screen arrives as.
+
 ## Where the description comes from
 
 - The Wayland backend reads the output's image description through

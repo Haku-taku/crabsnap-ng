@@ -83,7 +83,11 @@ overlay's own Copy action instead. An encoding is chosen by
 the flag first, then by the file name's extension, then by the configured default, then PNG; so
 `shot -f a.jpg` is a JPEG with no flag, and `--format webp` wins over a `.png` name.
 
-PNG is built in. The other offered formats — `jpg`, `webp`, `avif`, `jxl`, `tiff`, `bmp`, `gif`,
+PNG is built in, in both bit depths: 8-bit sRGB for an SDR picture, and 16-bit BT.2020 PQ when
+the picture holds light above the display's white, with `cICP` and `cLLI` written beside the
+pixels. Reading a PNG — including that 16-bit one — goes through the same crate, so an HDR file
+this tool saved is read back as the light it holds even with no ffmpeg anywhere.
+The other offered formats — `jpg`, `webp`, `avif`, `jxl`, `tiff`, `bmp`, `gif`,
 `qoi` — are ffmpeg's: the container, the encoder, its pixel formats and its parameter list all
 come from libavformat and libavcodec at startup, and the picture is encoded in this process
 through a C shim compiled against the ffmpeg headers on the build machine
@@ -415,6 +419,13 @@ path, and a forward slash turns the whole string into a module name, where the p
 normalise it. The join uses the target's separator now, and a failed load names the path it tried
 rather than the bare library name. `info formats` with `library_directory` set and the DLL
 directory off `PATH` is what catches it.
+
+**The PNG crate reads cICP and cLLI and writes neither.** `Info` carries both and `Decoder`
+fills them, so a 16-bit PNG written through `Encoder::with_info` looked complete until the
+round-trip test decoded it: no tag, and the light came back as sRGB. The writer emits IHDR, pHYs,
+the colour chunks it knows and IDAT, and drops the rest without a word. Both chunks are written
+by hand through `Writer::write_chunk` before IDAT, which is the order PNG 3.0 requires; the
+round-trip test is what notices if that changes.
 
 **A shortcut field hid the default it would use.** The settings window put the default chord in
 the field's placeholder, so an untouched action showed an empty box: MD3 draws a placeholder only

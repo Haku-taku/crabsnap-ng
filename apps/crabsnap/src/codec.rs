@@ -197,7 +197,13 @@ impl Codecs {
     pub fn encode(&self, image: &Cropped, encoding: Encoding) -> Result<Vec<u8>, String> {
         self.ensure(encoding)?;
         if encoding.is_png() {
-            return image.png();
+            // A picture with light above SDR white keeps it: the built-in writer covers the
+            // HDR case too, so losing the libraries costs no picture quality.
+            return if image.wants_hdr_file() {
+                image.hdr_png()
+            } else {
+                image.png()
+            };
         }
         let format = self.format(encoding)?;
         let empty = Vec::new();

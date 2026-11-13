@@ -245,6 +245,14 @@ puts the same PNG on the clipboard, under `image/png` and nothing else; the copy
 goes through `ClipboardHost` rather than the overlay's window, because the
 source must outlive the surface that made it.
 
+A picture with light above the display's own white is written as a 16-bit PNG instead: BT.2020
+primaries, PQ codes, `cICP` saying how to read them and `cLLI` carrying the measured peak.
+Nothing is tone mapped there — PQ is absolute, so a 1000-nit highlight stays 1000 nits — and the
+writer is the same built-in one, so HDR survives on a machine with no ffmpeg at all. A desktop
+whose brightest pixel is its own white is an SDR picture and stays 8-bit. Reading such a file is
+the same crate in reverse: a 16-bit PNG whose cICP says PQ arrives as scRGB light, exactly what a
+capture of an HDR screen arrives as, so a pin of either behaves alike.
+
 Encoding runs on the worker (`ui_platform::jobs`): `Save` and `Copy` hand the
 settled crop to a job and read the result back in the next `view` or `on_turn`,
 so the frame that starts a save is not held by it. The daemon's output hotkey

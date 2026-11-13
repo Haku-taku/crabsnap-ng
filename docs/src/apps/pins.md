@@ -371,7 +371,11 @@ of flattening them: a source deeper than 8 bits, or one tagged PQ or HLG, is
 converted to `RGBA64LE` and packed into the 2-10-10-10 words
 `PixelStorage::Packed10` names, with its primaries and transfer carried along;
 everything else arrives as `Sdr8`. Only the first frame of an animated file is
-read — a pin is a still. The YUV→RGB matrix follows the stream's own
+read — a pin is a still. PNG is the exception: it is read by this build's own decoder
+(`crabsnap_core::capture::read_png`), which is what the tool can always fall back on. That
+decoder understands the HDR form this tool writes — 16-bit RGBA with a PQ `cICP` — and hands it
+back as scRGB `Float16` with its light intact, so an HDR screenshot opens without ffmpeg; a
+16-bit PNG with no tag is sRGB codes and arrives as `Sdr8`. The YUV→RGB matrix follows the stream's own
 `color_space` tag (BT.709, BT.601, SMPTE 240M, FCC, BT.2020), because
 libswscale's guess is right for the first two and wrong for the last.
 

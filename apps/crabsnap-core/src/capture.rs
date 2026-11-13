@@ -9,8 +9,9 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use ui_core::colour::{
-    ContentColour, Destination, Domain, PixelStorage, Placement, SCRGB_WHITE_NITS, ToneMapping,
-    TransferFunction, half_to_f32,
+    Chromaticities, ContentColour, Destination, Domain, PixelStorage, Placement, SCRGB_WHITE_NITS,
+    SDR_WHITE_NITS, ToneMapping, TransferFunction, WhiteAdaptation, f32_to_half,
+    gamut_matrix_adapted, half_to_f32,
 };
 use ui_core::geom::Rect;
 
@@ -393,7 +394,112 @@ impl Cropped {
     }
 }
 
+/// What an HDR file from this tool holds, as H.273 code points: BT.2020 primaries in PQ.
+const HDR_FILE_PRIMARIES: u8 = 9;
+const HDR_FILE_TRANSFER: u8 = 16;
+
 impl Cropped {
+    /// Whether a file should keep the light instead of rolling it into SDR white.
+    ///
+    /// The ruler is the display's own white, as for the badge: a desktop screenshot whose
+    /// brightest pixel is that white is an SDR picture, and only light above it needs PQ.
+    pub fn wants_hdr_file(&self) -> bool {
+        if !self.colour.holds_absolute_light() {
+            return false;
+        }
+        // Measuring is what fills the light in; the value itself is `is_hdr`'s question.
+        self.measure_peak();
+        self.light.is_hdr()
+    }
+
+    /// The region as a 16-bit PNG that keeps the light: BT.2020 primaries, PQ codes.
+    ///
+    /// PQ is absolute, so nothing is tone mapped: a highlight the screen showed at 1000 nits
+    /// is 1000 nits in the file. The cICP chunk says how to read the codes, and cLLI carries
+    /// the measured peak for a reader that wants it before decoding.
+    pub fn hdr_png(&self) -> Result<Vec<u8>, String> {
+        let samples = self.pq_samples();
+        let per_metre = pixels_per_metre(density(self.scale));
+        let mut info = png::Info::default();
+        info.width = self.width;
+        info.height = self.height;
+        info.bit_depth = png::BitDepth::Sixteen;
+        info.color_type = png::ColorType::Rgba;
+        // pHYs is the density field: the size the screen gave the picture, as for SDR.
+        info.pixel_dims = Some(png::PixelDimensions {
+            xppu: per_metre,
+            yppu: per_metre,
+            unit: png::Unit::Meter,
+        });
+        let mut bytes = Vec::new();
+        let encoder = png::Encoder::with_info(&mut bytes, info)
+            .map_err(|error| format!("encode PNG: {error}"))?;
+        let mut writer = encoder
+            .write_header()
+            .map_err(|error| format!("encode PNG: {error}"))?;
+        // The crate parses these two on the way in but writes neither on the way out, so
+        // they are written here; both must precede IDAT.
+        let code_points = [HDR_FILE_PRIMARIES, HDR_FILE_TRANSFER, 0, 1];
+        writer
+            .write_chunk(png::chunk::cICP, &code_points)
+            .map_err(|error| format!("encode PNG: {error}"))?;
+        // cLLI states the peak in units of 0.0001 cd/m²; zero means "not stated".
+        if let Some(peak) = self.measure_peak() {
+            let mut light_level = [0u8; 8];
+            let quantized = (peak * 10_000.0).round() as u32;
+            light_level[..4].copy_from_slice(&quantized.to_be_bytes());
+            writer
+                .write_chunk(png::chunk::cLLI, &light_level)
+                .map_err(|error| format!("encode PNG: {error}"))?;
+        }
+        writer
+            .write_image_data(&samples)
+            .map_err(|error| format!("encode PNG: {error}"))?;
+        drop(writer);
+        Ok(bytes)
+    }
+
+    /// The picture as big-endian BT.2020 PQ samples, four 16-bit channels per texel.
+    fn pq_samples(&self) -> Vec<u8> {
+        let to_2020 = if self.colour.primaries == Chromaticities::BT2020 {
+            None
+        } else {
+            Some(gamut_matrix_adapted(
+                self.colour.primaries,
+                Chromaticities::BT2020,
+                WhiteAdaptation::Bradford,
+            ))
+        };
+        // What one unit of the picture is worth in nits: a float texel is already scRGB's
+        // light, PQ codes decode to a fraction of 10000, and relative codes mean the desktop
+        // white the file would otherwise have used.
+        let scale = if self.colour.storage == PixelStorage::Float16 {
+            SCRGB_WHITE_NITS
+        } else if self.colour.transfer == TransferFunction::Pq {
+            10_000.0
+        } else {
+            SDR_WHITE_NITS
+        };
+        let texel = self.colour.storage.bytes_per_texel();
+        let mut samples = Vec::with_capacity((self.width as usize) * (self.height as usize) * 8);
+        for bytes in self.data.chunks_exact(texel) {
+            let (values, alpha) = self.colour.storage.unpack(bytes);
+            let linear = if self.colour.storage == PixelStorage::Float16 {
+                values
+            } else {
+                values.map(|value| self.colour.transfer.decode(value))
+            };
+            let nits = linear.map(|value| value * scale);
+            let [red, green, blue] = to_2020.map_or(nits, |matrix| multiply(matrix, nits));
+            for channel in [red, green, blue] {
+                samples.extend_from_slice(&quantize(channel).to_be_bytes());
+            }
+            let alpha = (alpha.clamp(0.0, 1.0) * 65535.0).round() as u16;
+            samples.extend_from_slice(&alpha.to_be_bytes());
+        }
+        samples
+    }
+
     /// The region as a PNG, for a file or for the clipboard.
     pub fn png(&self) -> Result<Vec<u8>, String> {
         let rgba = self.rendition();
@@ -421,6 +527,17 @@ impl Cropped {
     }
 }
 
+/// One channel of light, in nits, as a 16-bit PQ sample.
+fn quantize(nits: f32) -> u16 {
+    (TransferFunction::Pq.encode(nits / 10_000.0).clamp(0.0, 1.0) * 65535.0).round() as u16
+}
+
+/// A linear RGB triple through a 3×3 colour matrix.
+fn multiply(matrix: [[f32; 3]; 3], rgb: [f32; 3]) -> [f32; 3] {
+    let row = |at: usize| matrix[at][0] * rgb[0] + matrix[at][1] * rgb[1] + matrix[at][2] * rgb[2];
+    [row(0), row(1), row(2)]
+}
+
 /// A logical point is 96 dpi, the web's own convention: a 2× capture says 192 dpi, which is
 /// exactly the scale it was taken at, in a field every viewer understands.
 pub const POINT_DPI: f32 = 96.0;
@@ -435,14 +552,34 @@ pub fn pixels_per_metre(dpi: u32) -> u32 {
     (dpi as f32 / 0.0254).round().max(1.0) as u32
 }
 
-/// Decode PNG bytes into straight-alpha RGBA8, with the same crate this program writes them.
+/// One decoded PNG: its pixels and what they mean.
+pub struct Png {
+    pub width: u32,
+    pub height: u32,
+    /// RGBA8 codes, or straight-alpha Float16 scRGB when `colour` says so.
+    pub data: Vec<u8>,
+    pub colour: ContentColour,
+}
+
+/// Decode PNG bytes, with the same crate this program writes them.
 ///
 /// The ffmpeg program can only hand a picture back as a PNG, so reading that one goes
-/// through a decoder we control instead of a second list of what ffmpeg can read.
-pub fn read_png(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
+/// through a decoder we control instead of a second list of what ffmpeg can read. A 16-bit
+/// PNG whose cICP says PQ is read back as the light it holds; every other PNG is sRGB codes.
+pub fn read_png(bytes: &[u8]) -> Result<Png, String> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::IDENTITY);
     let mut reader = decoder.read_info().map_err(|error| error.to_string())?;
+    let (width, height, depth, color_type, cicp) = {
+        let info = reader.info();
+        (
+            info.width,
+            info.height,
+            info.bit_depth,
+            info.color_type,
+            info.coding_independent_code_points,
+        )
+    };
     let capacity = reader
         .output_buffer_size()
         .ok_or_else(|| "the PNG is too large to decode".to_string())?;
@@ -450,16 +587,86 @@ pub fn read_png(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     let frame = reader
         .next_frame(&mut pixels)
         .map_err(|error| error.to_string())?;
-    // The encoder on the other side was told to write RGBA8; anything else is a producer
-    // that did not keep its promise, and converting here would hide that.
-    if frame.color_type != png::ColorType::Rgba || frame.bit_depth != png::BitDepth::Eight {
-        return Err(format!(
-            "the PNG came back as {:?} {:?}, not 8-bit RGBA",
-            frame.color_type, frame.bit_depth
-        ));
-    }
     pixels.truncate(frame.buffer_size());
-    Ok((frame.width, frame.height, pixels))
+    match (color_type, depth) {
+        (png::ColorType::Rgba, png::BitDepth::Eight) => Ok(Png {
+            width,
+            height,
+            data: pixels,
+            colour: ContentColour::SDR,
+        }),
+        (png::ColorType::Rgba, png::BitDepth::Sixteen) => {
+            Ok(sixteen_bit(width, height, pixels, cicp))
+        }
+        // The encoder on the other side was told to write RGBA; anything else is a producer
+        // that did not keep its promise, and converting here would hide that.
+        _ => Err(format!(
+            "the PNG is {color_type:?} {depth:?}, not 8- or 16-bit RGBA"
+        )),
+    }
+}
+
+/// A 16-bit RGBA PNG as light: PQ codes become scRGB texels, anything else its sRGB code.
+fn sixteen_bit(
+    width: u32,
+    height: u32,
+    pixels: Vec<u8>,
+    cicp: Option<png::CodingIndependentCodePoints>,
+) -> Png {
+    let pq = cicp.filter(|code| code.transfer_function == 16);
+    let Some(cicp) = pq else {
+        // A 16-bit PNG with no PQ tag says sRGB in more bits: the high byte is the code.
+        let data = pixels
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .flat_map(|texel| [texel[0], texel[2], texel[4], texel[6]])
+            .collect();
+        return Png {
+            width,
+            height,
+            data,
+            colour: ContentColour::SDR,
+        };
+    };
+    let primaries = match cicp.color_primaries {
+        9 => Chromaticities::BT2020,
+        12 => Chromaticities::DISPLAY_P3,
+        _ => Chromaticities::SRGB,
+    };
+    let to_srgb = if primaries == Chromaticities::SRGB {
+        None
+    } else {
+        Some(gamut_matrix_adapted(
+            primaries,
+            Chromaticities::SRGB,
+            WhiteAdaptation::Bradford,
+        ))
+    };
+    let code = |texel: &[u8; 8], at: usize| {
+        f32::from(u16::from_be_bytes([texel[at], texel[at + 1]])) / 65535.0
+    };
+    let mut data = Vec::with_capacity(pixels.len());
+    for texel in pixels.as_chunks::<8>().0 {
+        let nits = [0, 2, 4].map(|at| TransferFunction::Pq.decode(code(texel, at)) * 10_000.0);
+        let [red, green, blue] = to_srgb.map_or(nits, |matrix| multiply(matrix, nits));
+        for channel in [red, green, blue] {
+            let scrgb = f32_to_half(channel / SCRGB_WHITE_NITS);
+            data.extend_from_slice(&scrgb.to_le_bytes());
+        }
+        data.extend_from_slice(&f32_to_half(code(texel, 6)).to_le_bytes());
+    }
+    Png {
+        width,
+        height,
+        data,
+        colour: ContentColour {
+            storage: PixelStorage::Float16,
+            primaries: Chromaticities::SRGB,
+            transfer: TransferFunction::Linear,
+            max_nits: 0.0,
+        },
+    }
 }
 
 /// What density a PNG says it was saved at, as the scale this app records; 1 when it says
@@ -726,5 +933,49 @@ mod tests {
             Some(1000.0),
             "the rendition measured the picture it wrote"
         );
+    }
+
+    /// An HDR PNG keeps the light it was saved with: the file declares PQ over BT.2020 in
+    /// its cICP chunk, and reading it back measures the same nits.
+    #[test]
+    fn an_hdr_png_keeps_its_light_through_a_round_trip() {
+        // 1.0 is 80 nits in scRGB and 12.5 is 1000; both opaque and exact in binary16.
+        let texel = |light: u16| [light, light, light, 0x3c00].map(u16::to_le_bytes).concat();
+        let frame = Frame {
+            width: 2,
+            height: 1,
+            stride: 16,
+            pixels: [texel(0x3c00), texel(0x4a40)].concat(),
+            format: PixelFormat::Rgba16F,
+            colour: ContentColour::scrgb(1000.0),
+            output: None,
+            scale: 1.0,
+            reference_nits: 240.0,
+        };
+        let cropped = frame.into_image().crop(Rect::new(0.0, 0.0, 2.0, 1.0));
+        assert!(
+            cropped.wants_hdr_file(),
+            "1000 nits is above the file's white and must not be rolled off"
+        );
+
+        let bytes = cropped.hdr_png().expect("encode");
+        assert!(
+            bytes.windows(4).any(|tag| tag == b"cICP"),
+            "the file does not say how to read its codes"
+        );
+
+        let picture = read_png(&bytes).expect("decode");
+        assert_eq!(picture.colour.storage, PixelStorage::Float16);
+        assert!(picture.colour.holds_absolute_light());
+        assert_eq!((picture.width, picture.height), (2, 1));
+        let peak = brightest_nits(&picture.data, picture.colour).expect("float texels are light");
+        assert!((peak - 1000.0).abs() < 1.0, "read back {peak} nits");
+        let (values, alpha) = PixelStorage::Float16.unpack(&picture.data[..8]);
+        assert!(
+            (values[0] * SCRGB_WHITE_NITS - 80.0).abs() < 0.5,
+            "the 80-nit texel came back as {} nits",
+            values[0] * SCRGB_WHITE_NITS
+        );
+        assert_eq!(alpha, 1.0, "converting the file lost its alpha");
     }
 }
