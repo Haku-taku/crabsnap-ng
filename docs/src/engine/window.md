@@ -312,8 +312,8 @@ management where available, and lending the connection to application
 protocols through `WaylandLink`. On Windows, a decorated window and an
 approximated layer are behind the same spec: a topmost popup that takes clicks
 only where its frame consumes them, gives up the monitor edge an auto-hidden
-taskbar hides behind, and hands the keyboard back when a pointer-following
-surface is left; see
+taskbar hides behind unless the spec asks to cover it, and hands the keyboard
+back when a pointer-following surface is left; see
 [Rendering Backends](../rendering-backends.md).
 
 Not implemented: macOS and X11 windows; multi-seat input; tablet and touch

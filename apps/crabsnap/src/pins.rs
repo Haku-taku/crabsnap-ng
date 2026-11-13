@@ -14,7 +14,9 @@ use ui_core::draw::ImageEntry;
 use ui_core::geom::{Insets, Point};
 use ui_platform::SurfaceId;
 use ui_platform::host::{MessageCtx, OpenOptions};
-use ui_platform::window::{Anchor, ExclusiveZone, KeyboardMode, Layer, LayerSpec, SurfaceSpec};
+use ui_platform::window::{
+    Anchor, AutoHide, ExclusiveZone, KeyboardMode, Layer, LayerSpec, SurfaceSpec,
+};
 
 use crate::codec::Codecs;
 use crate::pin::ExportAsk;
@@ -68,6 +70,7 @@ pub(crate) fn canvas_surface(screen: (u32, u32)) -> SurfaceSpec {
             // the canvas covering the output, a held keyboard would swallow typing meant for
             // the window below wherever no pin is.
             keyboard: KeyboardMode::FollowPointer,
+            auto_hide: AutoHide::Yield,
         },
     )
 }

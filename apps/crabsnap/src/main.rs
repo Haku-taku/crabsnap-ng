@@ -56,7 +56,9 @@ use ui_i18n::{Language, LanguageChoice};
 use ui_platform::element::Element;
 use ui_platform::host::{Backend as _, Host, OpenOptions};
 use ui_platform::view::App;
-use ui_platform::window::{Anchor, ExclusiveZone, KeyboardMode, Layer, LayerSpec, SurfaceSpec};
+use ui_platform::window::{
+    Anchor, AutoHide, ExclusiveZone, KeyboardMode, Layer, LayerSpec, SurfaceSpec,
+};
 use ui_style::Env;
 use ui_widgets_md3::Md3Kit;
 
@@ -2588,6 +2590,10 @@ pub(crate) fn overlay_surface() -> SurfaceSpec {
             exclusive: ExclusiveZone::Ignore,
             margin: Insets::ZERO,
             keyboard: KeyboardMode::Exclusive,
+            // The frozen frame is the screen, so the surface has to be the screen: two rows
+            // shorter would squeeze the picture and put every pixel a little off from where
+            // the user left it.
+            auto_hide: AutoHide::Cover,
         },
     )
 }

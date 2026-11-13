@@ -88,7 +88,10 @@ Re-encoding it per frame is what makes capture tools janky.
 
 Implemented as `CRABSNAP_OVERLAY=1`: connect without a surface, capture, upload,
 then open a layer surface the size of the output and draw the texture filling
-it. Verified in a live session by sampling the screen while it ran — the overlay
+it. On Windows the spec asks for `AutoHide::Cover`: a surface that stopped short
+of an auto-hidden taskbar's strip would squeeze every row of the picture, and a
+pointer would name a pixel it is not over. Verified in a live session by sampling
+the screen while it ran — the overlay
 covered the desktop, and a change made to the desktop underneath (window border
 size) never appeared.
 

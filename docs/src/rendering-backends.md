@@ -225,7 +225,9 @@ beneath another application. The rectangle comes from the spec: an anchored edge
 pins that side, opposite edges together stretch the surface, `margin` is the inset
 (and with a single edge the position), and `size` is honoured only where the
 anchors leave room; a rect that reaches the monitor edge an auto-hidden taskbar
-hides behind gives that two-pixel strip back, or the bar stops coming up.
+hides behind gives that two-pixel strip back, or the bar stops coming up, unless
+the spec asks for `AutoHide::Cover` instead of the default `Yield` — a surface
+whose picture is the screen cannot be shorter than the screen.
 `KeyboardMode::None` adds `WS_EX_NOACTIVATE`, `Exclusive` calls
 `SetForegroundWindow` once the popup is shown, and the other two modes activate
 through `WM_MOUSEACTIVATE` only when the click lands on an area the surface
@@ -884,6 +886,24 @@ Measured in release on the same output. The path stays a full pass because the
 destination's encoding and the source's colour space can differ, and doing it on
 the GPU needs a shader per source/destination pair the scene does not have yet.
 
+**The strip an auto-hidden taskbar keeps squeezed the frozen picture.** The
+give-back above was written for every layer that reaches the edge, and the
+capture overlay is one: on a 2560x1440 output with the taskbar hiding at the
+bottom, the overlay opened 1438 rows tall and drew the frozen frame into it with
+`ImageFit::Fill`, so 1440 picture rows landed in 1438 surface rows. Every mark
+and every crop sat up to two pixels off from the pixel it was drawn over, and the
+screen's last two rows could not be selected at all. `LayerSpec` now says which
+it wants: `AutoHide::Yield` — the default, which keeps the bar reachable — or
+`AutoHide::Cover`. The overlay covers the edge, because a picture that is the
+screen has to be the screen; the auto-hidden taskbar stays down while the overlay
+is up, which is the same trade a modal selection makes, since the overlay is
+opaque and would swallow the click the bar was brought up for. A pin canvas keeps
+yielding: pins outlive the capture they came from, and a taskbar that could not
+be brought up for as long as one is on screen would be the worse bargain. Caught
+by the overlay's own window: `EnumWindows` and `GetWindowRect` report 0,0
+2560x1440, and `examples/layers.rs` now opens a `Cover` layer and requires the
+monitor rect; that check printed OK on this machine.
+
 ## Status
 
 Implemented: both presenters, dma-buf zero-copy, explicit sync, HDR targets,
@@ -903,8 +923,9 @@ serves a named-pipe channel and global hotkeys. A layer surface opens as a
 topmost popup on the primary monitor, placed by the spec's anchors, size and
 margins, painted by one window and shaped to the areas its frame publishes by
 another, so a click leaves it wherever it claims nothing; the strip an
-auto-hidden taskbar hides behind stays with the desktop, and a `FollowPointer`
-layer takes the keyboard on a click and hands it back when the pointer leaves.
+auto-hidden taskbar hides behind stays with the desktop unless the spec covers
+it, and a `FollowPointer` layer takes the keyboard on a click and hands it back
+when the pointer leaves.
 An input method composes through IMM32, with the engine's preedit and
 commit events and the IME windows at the caret. A screen capture duplicates an
 output through Desktop Duplication, asking for the surface an advanced colour
