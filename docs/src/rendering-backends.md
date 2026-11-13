@@ -926,6 +926,24 @@ device and not to the session. Nothing in the suite pins it: a capture session
 needs a display, and the check that catches a regression is cycling sessions in
 one process and reading its handle count.
 
+**A lost device took the window with it.** A driver reset, an adapter removal or a TDR left
+every D3D11 call failing and the presenter reported the failure as final, so the surface closed
+— and before the loop's error policy changed, the process with it. `Win32Presenter::device_loss`
+now asks `ID3D11Device::GetDeviceRemovedReason`, which keeps answering after the device is
+gone, and `Session::draw` rebuilds the presenter on that answer: a new device, renderer, swap
+chain and composition, which is what a flip-model window needs since it holds one chain at a
+time and the old one has to leave its visual first. What is not GPU state survives — the
+supersampling factor is re-applied, and the glyph atlases and registered images re-upload
+because a fresh presenter and renderer start with empty caches. A failure with a healthy device
+is still reported unchanged rather than retried. `WM_DISPLAYCHANGE` asks for the same rebuild,
+because a chain's format and colour space are decided when it is created and the output under
+the window may now present HDR where it did not, or the reverse. The removal path is
+`[unverified]` against a real removal, which needs the adapter disabled while a pin is on
+screen; if the trigger misses, the failure reaches the loop, which retires just that surface.
+The rebuild itself was exercised by posting `WM_DISPLAYCHANGE` twice at a live settings window:
+each rebuild re-made the chain and the window kept painting, which is what proves the old chain
+leaves the window before the new one attaches — a second flip chain on one window is refused.
+
 ## Status
 
 Implemented: both presenters, dma-buf zero-copy, explicit sync, HDR targets,
@@ -951,7 +969,10 @@ when the pointer leaves.
 An input method composes through IMM32, with the engine's preedit and
 commit events and the IME windows at the caret. A screen capture duplicates an
 output through Desktop Duplication, asking for the surface an advanced colour
-desktop composes in and returning SDR sRGB codes.
+desktop composes in and returning SDR sRGB codes. A surface whose device DXGI
+reports as removed, or whose window hears that the display changed, rebuilds its
+device, chain and renderer and redraws; the process loop retires a surface that
+fails rather than ending.
 
 Not implemented: on the Windows process loop, a selection reader; on the
 Windows window, a paste that carries more than text, the input method's
