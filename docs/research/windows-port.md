@@ -68,7 +68,7 @@ An HWND swapchain cannot be premultiplied. `CreateSwapChainForHwnd` rejects
 for pins, the toolbar, and the overlay, and it is simpler to use one path for
 opaque windows too. The alternative, `WS_EX_LAYERED` with
 `UpdateLayeredWindow`, copies the whole surface through the CPU on every frame
-and is kept only for the CPU presenter.
+and is rejected for that reason.
 
 ### D3 — Direct3D 11 first
 
@@ -80,15 +80,7 @@ also has WARP, which gives the port a software device for CI, for RDP sessions,
 and for virtual machines. D3D12 buys nothing this renderer can measure; Vulkan
 is assessed in [Is Vulkan the right renderer?](#vulkan).
 
-### D4 — The CPU presenter is a first-class path
-
-`PresentTarget` on Windows is a DIB section presented with `StretchDIBits`
-(`UpdateLayeredWindow` when the surface needs alpha). It is the reference for
-tests and the fallback, as on Wayland, and it gives the port a complete
-end-to-end path before a shader exists. The gallery's `GALLERY_CPU=1` habit
-becomes the Windows bring-up mode.
-
-### D5 — Layer surfaces are approximated, not emulated
+### D4 — Layer surfaces are approximated, not emulated
 
 `SurfaceRole::Layer` has no Win32 counterpart. The backend turns the spec into
 a rectangle on a monitor and a set of window styles. The mapping is on the
@@ -96,13 +88,13 @@ types already (`ui/crates/ui-platform/src/window.rs`), but the Windows
 approximation is larger than that comment admits; see
 [Surfaces and layers](#surfaces-and-layers).
 
-### D6 — Platform services stay behind their existing traits
+### D5 — Platform services stay behind their existing traits
 
 Clipboard, hotkeys, IPC, language, theme, outputs, and the worker waker each
 already have a portable interface. The Windows backend implements those
 interfaces; no portable crate gains a `cfg(windows)` branch or a Win32 type.
 
-### D7 — The application splits, the engine does not
+### D6 — The application splits, the engine does not
 
 `crabsnap-core` stays portable: selection geometry, the document, the pin
 model, the protocol, and the settings schema do not change. `apps/crabsnap`
@@ -111,7 +103,7 @@ descriptions, hotkey registration, the daemon's transport, and the tray are
 per-platform. `apps/crabsnap-platform` becomes the selector the event-loop page
 already describes, instead of a Unix socket client that every binary bypasses.
 
-### D8 — Unpackaged, per-user, signed
+### D7 — Unpackaged, per-user, signed
 
 An installer under the user's profile, no elevation, no service. A service
 cannot put a window on the user's desktop, and an AppContainer adds restrictions
@@ -219,7 +211,7 @@ rectangle. Three mechanisms exist:
 | --- | --- | --- |
 | `WM_NCHITTEST` against the published input areas | Per-area hit testing, exact to the engine's hit index | `HTTRANSPARENT` is documented for windows in the same thread; cross-process pass-through must be measured before it is trusted |
 | `SetWindowRgn` from the same areas | Cross-process click-through | Integer regions, rebuilt when a pin moves, and no antialiased edge |
-| `WS_EX_LAYERED` with `UpdateLayeredWindow` | Per-pixel alpha hit testing, which the shell already implements | A CPU copy of the whole surface per frame; only acceptable for the CPU path |
+| `WS_EX_LAYERED` with `UpdateLayeredWindow` | Per-pixel alpha hit testing, which the shell already implements | A CPU copy of the whole surface per frame |
 
 The pin canvas is one window the size of a monitor. It is the surface where
 this choice matters: a click between pins must reach the desktop, and a click
@@ -708,7 +700,7 @@ ways this design does not yet answer.
 | `CF_DIB` with straight alpha | White or black fringes around the selection | `CF_DIBV5` with an alpha mask, or PNG |
 | Named pipe without an ACL or `PIPE_REJECT_REMOTE_CLIENTS` | Another user or a remote client connects | Explicit descriptor, session and user in the name |
 | `LoadLibrary("avcodec-61.dll")` from the working directory | DLL hijack | `LOAD_LIBRARY_SEARCH_DEFAULT_DIRS` and `AddDllDirectory` |
-| `UpdateLayeredWindow` for a full-screen canvas every frame | A CPU copy of the monitor per frame | Layered windows only for the CPU presenter |
+| `UpdateLayeredWindow` for a full-screen canvas every frame | A CPU copy of the monitor per frame | Layered windows carry no surface here; the composition swapchain does |
 | Pacing on `DwmFlush` | Frames dropped into a closed window | Pace on the swapchain waitable |
 | `Shell_NotifyIcon` without `TaskbarCreated` | The tray icon disappears after an Explorer restart | Re-add on the broadcast |
 | Using `\\.\DISPLAY1` as a saved output id | The setting attaches to the wrong monitor after a dock change | Hash the monitor device path |
@@ -723,11 +715,10 @@ dependency direction in `crate-map.md`: platform, then paint, then app.
 
 | Stage | Content | Exit criterion |
 | --- | --- | --- |
-| 0 | `ui-platform-win32`: HWND surfaces, message pump, DPI, `PresentTarget` over a DIB, outputs, language, theme, waker; the crate is classified `PLATFORM_BOUND` with a reason | `ui-gallery` runs on Windows with the CPU path, at 100% and 150%, on two monitors |
+| 0 | `ui-platform-win32`: HWND surfaces, message pump, DPI, the D3D11 device and its composition swapchain for opaque surfaces — solids, glyphs, images, readback — outputs, language, theme, waker; the crate is classified `PLATFORM_BOUND` with a reason | `ui-gallery` runs on Windows at 100% and 150%, on two monitors, and the `d3d_*_scene` probes match the CPU reference on WARP and on a GPU |
 | 1 | Services: clipboard, drag-and-drop, hotkeys, named pipe, tray, single instance | `crabsnap shot --clipboard` pastes into Explorer and Word; `pin list` answers over the pipe; a taken hotkey is reported |
-| 2 | Renderer extraction and D3D11 for opaque surfaces: device, composition swapchain, solids, glyphs, images, readback | The `d3d_*_scene` probes match the CPU reference on WARP and on a GPU |
-| 3 | Transparency, layers, effects, canvases, HDR, input regions, activation policy | A pin canvas is click-through between pins and focused on a pin; the overlay is absent from its own capture; HDR is correct on a calibrated display |
-| 4 | Capture: WGC, Desktop Duplication, GDI fallback, `ContentColour`, the app shell, the daemon, settings, paths, ffmpeg | The Wayland verification list for the screenshot app passes on Windows, including HDR and window capture |
+| 2 | Transparency, layers, effects, canvases, HDR, input regions, activation policy | A pin canvas is click-through between pins and focused on a pin; the overlay is absent from its own capture; HDR is correct on a calibrated display |
+| 3 | Capture: WGC, Desktop Duplication, GDI fallback, `ContentColour`, the app shell, the daemon, settings, paths, ffmpeg | The Wayland verification list for the screenshot app passes on Windows, including HDR and window capture |
 | 5 | Packaging: installer, signing, autostart, tray, uninstall, first-run | A clean VM with no developer tools installs, captures, pins, and uninstalls |
 
 Stage 0 is the largest single item and the one that de-risks the rest. Stage 2
@@ -773,8 +764,8 @@ flaky test.
 
 | Area | Status |
 | --- | --- |
-| Win32 backend, CPU presenter | Planned; design complete in this report |
-| D3D11 renderer | Planned; blocked on the painter extraction |
+| Win32 backend, D3D11 presenter | Done: window, input, DPI, clipboard text, theme, `HostSession` trait; see `docs/src/rendering-backends.md` |
+| D3D11 renderer | Done |
 | Transparent surfaces and input regions | Planned; `HTTRANSPARENT` across processes is unverified |
 | Clipboard, drag-and-drop, hotkeys | Planned; format mapping is settled, the shell behaviour is not |
 | Named-pipe IPC | Planned; message mode and deferred replies are unverified |
