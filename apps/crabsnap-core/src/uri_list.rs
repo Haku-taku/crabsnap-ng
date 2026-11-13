@@ -49,19 +49,41 @@ fn line_path(line: &str) -> Option<PathBuf> {
     let Some(rest) = line.strip_prefix("file:") else {
         return Some(PathBuf::from(line));
     };
-    if let Some(after) = rest.strip_prefix("//") {
-        let (host, path) = match after.find('/') {
-            Some(at) => after.split_at(at),
-            None => (after, ""),
-        };
-        if host.is_empty() || host.eq_ignore_ascii_case("localhost") {
-            let decoded = percent_decode(path)?;
-            return (!decoded.is_empty()).then(|| PathBuf::from(decoded));
-        }
-        return Some(PathBuf::from(line));
+    let Some(after) = rest.strip_prefix("//") else {
+        // `file:/path` names the same file with no authority.
+        return percent_decode(rest).map(PathBuf::from);
+    };
+    let (host, path) = match after.find('/') {
+        Some(at) => after.split_at(at),
+        None => (after, ""),
+    };
+    if host.is_empty() || host.eq_ignore_ascii_case("localhost") {
+        let decoded = this_host(percent_decode(path)?);
+        return (!decoded.is_empty()).then(|| PathBuf::from(decoded));
     }
-    // `file:/path` names the same file with no authority.
-    percent_decode(rest).map(PathBuf::from)
+    // Another machine's file is a share of it, which Windows spells as a UNC path.
+    if cfg!(windows) {
+        let decoded = percent_decode(&path.replace('/', "\\"))?;
+        return (!decoded.is_empty()).then(|| PathBuf::from(format!("\\\\{host}{decoded}")));
+    }
+    Some(PathBuf::from(line))
+}
+
+/// A `file:` URI's path read the way the hosted file system spells it.
+///
+/// `file:///C:/x` names a drive path on Windows: the third slash is the empty authority's
+/// separator, and the drive letter starts the path itself. Windows also separates with `\`,
+/// so a URI's slashes are turned back into the separator its own paths are shown with. On
+/// Unix the URI path is already the path.
+fn this_host(path: String) -> String {
+    if !cfg!(windows) {
+        return path;
+    }
+    let bytes = path.as_bytes();
+    let drive =
+        bytes.len() >= 3 && bytes[0] == b'/' && bytes[1].is_ascii_alphabetic() && bytes[2] == b':';
+    let path = if drive { &path[1..] } else { &path[..] };
+    path.replace('/', "\\")
 }
 
 /// The bytes a URI escapes as `%XX`; `None` when they are not UTF-8, which a path built
@@ -108,14 +130,35 @@ mod tests {
                     \n\
                     /home/ollie/bare\n\
                     file:///C:/Users/ollie/kept.txt\n";
+        // The drive URI is the one form whose reading depends on the host it is read on.
+        let drive = if cfg!(windows) {
+            PathBuf::from(r"C:\Users\ollie\kept.txt")
+        } else {
+            PathBuf::from("/C:/Users/ollie/kept.txt")
+        };
         assert_eq!(
             parse(list),
             vec![
                 PathBuf::from("/home/ollie/shot.png"),
                 PathBuf::from("/home/ollie/two words.txt"),
                 PathBuf::from("/home/ollie/bare"),
-                PathBuf::from("/C:/Users/ollie/kept.txt"),
+                drive,
             ]
+        );
+    }
+
+    /// The Windows clipboard hands a copied file over as `CF_HDROP`, which the backend turns
+    /// into these URI shapes; a wrong reading would open another file than the one copied.
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_file_uri_names_a_drive_or_a_share() {
+        assert_eq!(
+            parse("file:///C:/Users/a%20b/shot.png"),
+            vec![PathBuf::from(r"C:\Users\a b\shot.png")]
+        );
+        assert_eq!(
+            parse("file://build/share/one%23.png"),
+            vec![PathBuf::from(r"\\build\share\one#.png")]
         );
     }
 

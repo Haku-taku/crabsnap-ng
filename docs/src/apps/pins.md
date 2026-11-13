@@ -1520,11 +1520,13 @@ Planned, in this order:
    code (**done**), LaTeX (**done**), palette (**done**: role generation at the
    standard contrast level, a picture's colours as its source, and a pixel
    picked from another pin or from the screen).
-6. Clipboard acquisition (**done** on Wayland through `ext_data_control_v1`):
-   `pin add --clipboard` reads the selection on the loop, turns a uri-list into
-   one pin per file and any other payload into one pin, and answers before the
-   bytes exist. The Windows and macOS transfer backends arrive with those
-   platforms; the seat `data_device` read is not wired (it needs focus).
+6. Clipboard acquisition (**done** on Wayland through `ext_data_control_v1`,
+   and on Windows through the backend's `SelectionReader`, which offers
+   `CF_HDROP` as a uri-list, `"PNG"` or a DIB as a PNG, and `CF_UNICODETEXT` as
+   text): `pin add --clipboard` reads the selection on the loop, turns a
+   uri-list into one pin per file and any other payload into one pin, and
+   answers before the bytes exist. The macOS transfer backend arrives with that
+   platform; the seat `data_device` read is not wired (it needs focus).
 
 ## See also
 

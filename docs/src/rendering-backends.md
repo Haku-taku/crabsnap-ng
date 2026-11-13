@@ -259,14 +259,34 @@ and not MIME types: text is `CF_UNICODETEXT`, `text/html` is `"HTML Format"` wit
 offsets around a marked fragment, `text/uri-list` is `CF_HDROP` with the `file:` URIs
 percent-decoded into wide paths, and `image/png` is `"PNG"` beside `CF_DIBV5` and `CF_DIB` —
 the formats Explorer, Word and Paint read, built by decoding the PNG, since a DIB is pixels.
-A MIME type with no Windows equivalent is refused rather than invented. A paste is still
-text only, because `Event::Paste` carries a string.
+A MIME type with no Windows equivalent is refused rather than invented. A paste into an
+editor is still text only, because `Event::Paste` carries a string.
+
+A command reads the clipboard through the process `Backend`, so `pin add --clipboard` asks
+the backend's `SelectionReader` what the copy offers and for one of those MIME types. The
+formats present become MIME types, most specific first: `CF_HDROP` is `text/uri-list`, one
+`file:` URI a line, written from the wide paths the shell hands over — a drive path under an
+empty authority, another machine's share as the URI's host, separators forward and every byte
+a URI does not carry escaped from UTF-8; `"PNG"` and a DIB are both `image/png`, the PNG
+bytes unchanged and the DIB decoded and re-encoded as PNG so one picture has one MIME; and
+`CF_UNICODETEXT` is `text/plain`. Windows copies a format in whole rather than holding it for
+a peer to pull, so a read finishes inside the call that starts it and `poll` only hands over
+what was copied. The app turns a URI list back into paths and a blob into a pin by its bytes.
 
 Measured with `cargo run -p ui-platform-win32 --example clipboard`, which reads each block
 back through the shell rather than through the encoder that wrote it: `DragQueryFileW`
 returned `C:\Windows\win.ini` and `C:\a b.txt` from two URIs, the HTML header's offsets
 delimited the fragment and ended at the block's last byte, and a 2x2 picture's `CF_DIBV5`
-and `CF_DIB` both began with its bottom-left pixel as blue, green, red, alpha.
+and `CF_DIB` both began with its bottom-left pixel as blue, green, red, alpha. The read side
+was measured live: with `[System.Windows.Forms.Clipboard]::SetImage` holding a 126x56
+picture — `CF_DIB` and nothing else — `crabsnap pin add --clipboard` pinned a 126x56 bitmap;
+`Set-Clipboard -Path` on a 156x80 PNG pinned the file, whose origin read
+`file:X:\crabsnap-ng\old\res\capture_pressed.png`; and a copied line of text became a text
+pin. Both conversions have a test that pins them:
+`a_written_dib_reads_back_as_the_same_picture` reads the DIBs the write side produces back
+through the read side, and `a_copied_path_becomes_a_file_uri` in
+`crates/ui-platform-win32/src/clipboard.rs`, with `a_windows_file_uri_names_a_drive_or_a_share`
+in `apps/crabsnap-core/src/uri_list.rs` for the path shapes the URI list is read back into.
 
 Input methods are IMM32. A frame's `ImeState` opens or closes the input context
 and puts the composition window at the caret, with the candidate list told to
@@ -944,6 +964,23 @@ The rebuild itself was exercised by posting `WM_DISPLAYCHANGE` twice at a live s
 each rebuild re-made the chain and the window kept painting, which is what proves the old chain
 leaves the window before the new one attaches — a second flip chain on one window is refused.
 
+**The clipboard was write-only on Windows.** The backend published every Windows format a
+content kind has, but `Backend::selection_reader` kept its default `None`, so `pin add --clipboard`
+— the one command whose whole purpose is another application's copy — reported "the clipboard
+offers nothing a pin can show ()" whatever had been copied. The backend now owns a
+`ClipboardReader` and the formats present become MIME types. Two traps surfaced only by running
+it: `image`'s `BmpDecoder::new_without_file_header` skips twelve bytes after a V4 or V5 header,
+believing the bit masks follow it, so a `CF_DIBV5` read through it ran past the pixels and
+failed with "failed to fill whole buffer"; a `BITMAPFILEHEADER` is now prepended instead, and
+the offset it carries is where the decoder reads from, which also settles a 40-byte
+`BI_BITFIELDS` header whose masks really do follow it. And `uri_list` read `file:///C:/x` as
+`/C:/x` on every host, a path Win32 cannot open and one the `CF_HDROP` reader would have
+produced for every copied file; the parser now maps a drive path under an empty authority and a
+foreign host to the local and UNC paths Windows uses. Caught by
+`a_written_dib_reads_back_as_the_same_picture`, watched red on the missing twelve bytes before
+it passed, `a_copied_path_becomes_a_file_uri`, `a_windows_file_uri_names_a_drive_or_a_share`,
+and three live pins from a DIB-only picture, a copied file and copied text.
+
 ## Status
 
 Implemented: both presenters, dma-buf zero-copy, explicit sync, HDR targets,
@@ -974,12 +1011,13 @@ reports as removed, or whose window hears that the display changed, rebuilds its
 device, chain and renderer and redraws; the process loop retires a surface that
 fails rather than ending.
 
-Not implemented: on the Windows process loop, a selection reader; on the
-Windows window, a paste that carries more than text, the input method's
-surrounding text (which needs TSF), and redraw during a modal resize drag; in a
-capture, HDR content (a float frame is converted to SDR, so light past SDR white
-clips, and a frame larger than one output is not assembled);
-Vulkan. The Windows and Vulkan notes in `old/` are surveys, not code.
+Not implemented: on the Windows window, a paste that carries more than text
+into an editor (the event carries a string, though the process can read a file
+list or a picture), the input method's surrounding text (which needs TSF), and
+redraw during a modal resize drag; in a capture, HDR content (a float frame is
+converted to SDR, so light past SDR white clips, and a frame larger than one
+output is not assembled); Vulkan. The Windows and Vulkan notes in `old/` are
+surveys, not code.
 
 ## See also
 
