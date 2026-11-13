@@ -130,12 +130,14 @@ carries `CF_UNICODETEXT`; the app colour scheme comes from
 read on every poll.
 
 `ui-platform-win32::Session` owns window, presenter and driver in that teardown
-order and offers the same `open`/`tick`/`finish` shape as the Wayland session, so
-the gallery reaches both through the seam in
-`crates/ui-gallery/examples/gallery/shell.rs`: the `Session` type is an alias per
-target, and everything else the gallery asks of its host is a capability
-function, so a backend that cannot answer says so and the report omits the
-number instead of printing a zero. Measured on Windows 11 at 1.25 device pixels
+order and offers the same `open`/`tick`/`finish` shape as the Wayland session.
+An app does not name either: it depends on `ui-host`, whose target tables choose
+the backend and whose two `pub use` lines re-export `Session`, `SessionOptions`,
+`Tick` and `ThemeWatch` under one name, so the gallery's manifest and source
+mention no OS. What a host can answer and another cannot stays a runtime
+question — the gallery asks its host for a refresh rate, a frame-callback count
+or a dma-buf count, and a host that cannot says so, leaving the number out of the
+report instead of printing a zero. Measured on Windows 11 at 1.25 device pixels
 per logical unit: the gallery draws its three control sets, a posted
 `WM_LBUTTONDOWN`/`WM_LBUTTONUP` on the MD3 switch flipped it and built the next
 frame, an animated page ran at 184 frames per second against a 275 Hz display,

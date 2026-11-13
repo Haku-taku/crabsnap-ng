@@ -36,6 +36,7 @@ contract to the lowest crate that can express it.
 | `ui-gpu-d3d11` | The D3D11 device: COM objects, generated HLSL and its constant-buffer layout, DXGI textures and targets; empty off Windows | Be a dependency of a portable crate |
 | `ui-platform-win32` | The Win32 window and its DXGI flip-model swap chain: the `SceneTarget` the engine presents through on Windows, the persistent frame target and the copy into the back buffer, the message pump's input and clipboard, the refresh/scale/theme queries, and the `Session` host | Be a dependency of a portable crate |
 | `ui-platform-wayland` | The Wayland XDG target: protocol glue, `wl_shm` buffers, input, clipboard, presenting | Be a dependency of a portable crate |
+| `ui-host` | The facade an app depends on: target tables pick the window backend and two `pub use` lines re-export it | Contain code, or be a dependency of a portable crate |
 | `ui-demo` | Shared showcase bootstrap for the demo binaries: window, presenter, bundled faces, loop | Be a dependency of a portable crate |
 
 ## Dependency shape
@@ -56,6 +57,7 @@ Read each line as "depends on". There are no other internal edges.
 | `ui-platform` | `ui-core`, `ui-paint`, `ui-text`, `ui-text-fontique`, `ui-math` |
 | `ui-paint-gpu` | `ui-core`, `ui-gpu-scene` |
 | `ui-gpu-d3d11` | `ui-gpu-scene`; `ui-core` for its example |
+| `ui-host` | `ui-platform`, and `ui-platform-wayland` (unix) or `ui-platform-win32` (windows) |
 | `ui-platform-win32` | `ui-core`, `ui-platform`, `ui-gpu-scene`, `ui-gpu-d3d11` |
 | `ui-platform-wayland` | `ui-core`, `ui-paint`, `ui-platform`, `ui-text`, `ui-text-fontique`, and `ui-paint-gpu` with `ui-gpu-egl` under `gpu` |
 | `ui-style` | `ui-core`, `ui-design` |
@@ -64,7 +66,7 @@ Read each line as "depends on". There are no other internal edges.
 | `ui-widgets-fluent` | `ui-core`, `ui-design`, `ui-platform`, `ui-style`, `ui-widgets` |
 | `ui-widgets-glass` | `ui-core`, `ui-design`, `ui-style`, `ui-widgets` |
 | `ui-demo` | `ui-core`, `ui-platform`, `ui-platform-wayland` |
-| `ui-gallery` | All of the above; examples only |
+| `ui-gallery` | All of the above; through `ui-host` as its only window dependency, examples only |
 
 `ui-core` is the hinge: it depends on nothing else in the workspace, and nearly
 everything depends on it. Adding an engine dependency to `ui-core` changes the

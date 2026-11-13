@@ -45,7 +45,8 @@ debug-assertions = true
 | `ui-platform/profile` | `hotpath` timing in every frame phase | Frame profiling only |
 | `ui-platform-wayland/profile` | The same in the present path, plus `ui-paint-gpu/profile` | Present-path profiling only |
 | `ui-paint-gpu/profile` | `hotpath` timing inside the renderer's passes | Reached through the wayland crate |
-| `ui-gallery/profile` | All of the above, plus the gallery's own frame report | `--example gallery --features profile` |
+| `ui-paint-gpu/egl-probes` | The GL probes under `examples/`, which need a real EGL context | Running `gpu_scene`, `gpu_image_scene` and their siblings on unix |
+| `ui-gallery/profile` | `ui-platform/profile`, plus the gallery's own frame report | `--example gallery --features profile` |
 
 `ui-text-fontique` has `default = []`. The system font stack is opt-in because
 a test binary should not depend on the machine's fonts unless it is a test
@@ -68,6 +69,15 @@ about fonts.
   are `gallery` (all control sets) and `winui_gallery` (Fluent only).
 - Platform backends are only reachable through a feature. A build without
   `gpu` still compiles the portable crates and the CPU presenter.
+- A backend whose platform is absent builds as an empty library: `ui-gpu-egl` and
+  `ui-platform-wayland` gate their bodies with `#![cfg(unix)]` and declare their bindings in
+  a `[target.'cfg(unix)'.dependencies]` table, the way `ui-gpu-d3d11` and
+  `ui-platform-win32` do for Windows. Both halves are needed; either one alone leaves the
+  workspace unbuildable on the other OS.
+- An app names `ui-host`, never a backend: its target tables choose one and two `pub use`
+  lines re-export it, so an app's manifest and source mention no OS.
+- `ui-demo` and the two demo front-ends that boot through it are unix-only until that
+  bootstrap is rebuilt on `ui-host::Session`; on Windows they build and print a message.
 
 ## Clippy
 

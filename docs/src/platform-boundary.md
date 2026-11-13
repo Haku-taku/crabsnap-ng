@@ -8,7 +8,7 @@ add a backend, and where the test does not look.
 
 `crates/ui-platform/tests/platform_boundary.rs` holds them.
 
-`PLATFORM_BOUND` — five crates, each with a written reason:
+`PLATFORM_BOUND` — six crates, each with a written reason:
 
 | Crate | Reason in the test |
 | --- | --- |
@@ -17,6 +17,18 @@ add a backend, and where the test does not look.
 | `ui-gpu-egl` | EGL device + GBM + dma-buf: unix fds, `libc`, `libgbm` |
 | `ui-gpu-d3d11` | D3D11 device: COM, DXGI and d3dcompiler are Win32 APIs, and the crate is empty off Windows |
 | `ui-platform-win32` | Win32 window, input and DXGI swap chain: user32 and dxgi are Windows APIs, and the crate is empty off Windows |
+| `ui-host` | Host facade: re-exports this target's window backend, so it depends on a platform crate by design |
+
+A backend whose platform is absent builds as an *empty library*, not as a compile error:
+`ui-gpu-egl` and `ui-platform-wayland` gate their bodies with `#![cfg(unix)]` and declare
+their bindings in a `[target.'cfg(unix)'.dependencies]` table, exactly as `ui-gpu-d3d11` and
+`ui-platform-win32` do for Windows. Gating the body alone is not enough — an empty crate
+still builds whatever it declares — and a body without the gate does not build at all.
+
+An application depends on `ui-host`, never on a backend. Its target tables choose the
+backend, its `src/lib.rs` re-exports the choice, and nothing in app code or app manifests
+mentions an OS. That the choice is compile-time is unavoidable: a crate that names Wayland's
+protocols cannot compile on Windows. Capabilities are still decided at runtime.
 
 Everything else is `PORTABLE`: `ui-core`, `ui-color-hct`, `ui-design`,
 `ui-gallery`, `ui-gpu-scene`, `ui-highlight`, `ui-i18n`, `ui-math`, `ui-paint`,

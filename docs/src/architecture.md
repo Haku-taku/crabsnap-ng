@@ -39,7 +39,7 @@ portable while its examples use a platform backend — named per target in its
 manifest, since a target can only name the backends that compile there.
 
 `PLATFORM_BOUND` today: `ui-gpu-egl`, `ui-gpu-d3d11`, `ui-platform-wayland`,
-`ui-platform-win32`, `ui-demo`. Everything else is `PORTABLE`, including the
+`ui-platform-win32`, `ui-host`, `ui-demo`. Everything else is `PORTABLE`, including the
 painter: `ui-gpu-scene` decides what to draw, and `ui-paint-gpu` (GL) and
 `ui-gpu-d3d11` (Windows) are its devices behind that trait.
 

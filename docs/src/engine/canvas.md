@@ -193,7 +193,7 @@ presented a still frame.
 The example needs a render node, so it runs outside the unit suite:
 
 ```sh
-cargo run --release -p ui-paint-gpu --example gpu_image_scene
+cargo run --release -p ui-paint-gpu --features egl-probes --example gpu_image_scene
 ```
 
 ## Status
