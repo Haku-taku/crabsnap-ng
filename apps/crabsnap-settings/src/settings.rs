@@ -30,7 +30,8 @@ use ui_widgets_md3::{
 const EN: &str = include_str!("../locales/en/settings.ftl");
 const ZH_CN: &str = include_str!("../locales/zh-CN/settings.ftl");
 
-const BACKENDS: [&str; 4] = ["auto", "ext", "screencopy", "portal"];
+/// The capture backends this build offers: a Wayland rung is not a choice on Windows.
+use crabsnap_platform::CAPTURE_BACKENDS as BACKENDS;
 const FORMATS: [&str; 4] = ["auto", "png", "jpeg", "webp"];
 
 const DIRECTORY_FIELD: &str = "settings/directory";
@@ -160,7 +161,7 @@ impl Script {
             match argument.as_str() {
                 "--save" => save = true,
                 "--backend" => script.backend = Some(choice(&mut args, BACKENDS, "--backend")?),
-                "--format" => script.format = Some(choice(&mut args, FORMATS, "--format")?),
+                "--format" => script.format = Some(choice(&mut args, &FORMATS, "--format")?),
                 "--directory" => {
                     script.directory = Some(free(&mut args, "--directory")?);
                 }
@@ -248,7 +249,7 @@ fn free(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<String, S
 
 fn choice(
     args: &mut impl Iterator<Item = String>,
-    options: [&'static str; 4],
+    options: &[&'static str],
     flag: &str,
 ) -> Result<Option<String>, String> {
     let value = args.next().ok_or_else(|| format!("{flag} needs a value"))?;
@@ -433,7 +434,7 @@ impl App for Settings {
         if !matches!(change, ui_core::change::Change::Activated) {
             return false;
         }
-        for name in BACKENDS {
+        for &name in BACKENDS {
             if id == option_id("backend", name) {
                 // `auto` is the absence of an override, not a backend called auto.
                 self.config.capture.backend = (name != "auto").then(|| name.to_string());
@@ -500,11 +501,7 @@ impl App for Settings {
         ));
 
         for (group, options, current) in [
-            (
-                "backend",
-                &BACKENDS[..],
-                self.config.capture.backend.as_deref(),
-            ),
+            ("backend", BACKENDS, self.config.capture.backend.as_deref()),
             ("format", &FORMATS[..], self.config.shots.format.as_deref()),
         ] {
             let heading = self

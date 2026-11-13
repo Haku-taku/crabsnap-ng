@@ -18,7 +18,6 @@ mod ffmpeg;
 mod hotkeys;
 mod loupe;
 mod notice;
-mod paths;
 mod pill;
 mod pin;
 mod pins;
@@ -33,6 +32,7 @@ use std::time::{Duration, Instant};
 
 use crabsnap_core::config::{Config, PinLook};
 use crabsnap_core::protocol::PinOrigin;
+use crabsnap_platform::paths;
 use pin::badge::{self, Badge};
 use pin::edit;
 use pin::{Bitmap, ExportAsk, PinContent, PinFrame};

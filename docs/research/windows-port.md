@@ -692,24 +692,27 @@ where it writes it.
 ## The application
 
 `crabsnap-core` keeps the selection geometry, the document, the pin model, the
-protocol types, and the settings schema. The platform shell is a new crate or a
-`cfg`-free module split inside `apps/crabsnap`: `capture_win`, `color_win`,
-`daemon_win`, `hotkeys_win`, `paths_win`, and `tray_win`. The event-loop page's
-migration note already describes the shape; the difference is that the Windows
-shell also owns capture and the tray, which have no engine contract.
+protocol types, the settings schema, and the parts of the save path that name no
+platform: where a shot goes given the platform's pictures folder, its file name,
+and the calendar arithmetic its stamp needs. The rest of the shell is
+`crabsnap-platform`, a facade over `crabsnap-platform-unix` and
+`crabsnap-platform-win32` chosen by target tables exactly as `ui-host` chooses a
+backend. Each sub-crate answers what the app asks a session for — the daemon
+channel, the user's directories and local clock, and the capture-backend names
+its build can offer — and no app code picks between them with a `cfg`.
 
-The first two pieces are done. An app opens its backend through
-`ui_host::connect`, which is the one name for the per-target choice, and reads
-the system's language list from `Host::languages`: Windows keeps that list in
-its own settings, while the POSIX environment is only the Unix answer. The
-settings window runs on that today — it was built and run on this machine, and
-the form came up with the system's Chinese catalogue. `crabsnap-platform` is a
-facade over `crabsnap-platform-unix` and `crabsnap-platform-win32`, chosen by
-target tables exactly as `ui-host` chooses a backend; the Unix client type-checks
-for Linux and the Windows one is a message-mode named pipe scoped to the logon
-session, where `WaitNamedPipe` with a zero timeout answers whether a daemon
-exists and `CallNamedPipe` carries one request and one answer. `crabsnap` itself
-still names Wayland in its capture, colour, daemon, hotkey and path modules.
+An app opens its backend through `ui_host::connect`, which is the one name for
+the per-target choice, and reads the system's language list from
+`Host::languages`: Windows keeps that list in its own settings, while the POSIX
+environment is only the Unix answer. The settings window runs on that today — it
+was built and run on this machine, and the form came up with the system's
+Chinese catalogue. Its capture-backend row asks the platform crate, so a Windows
+window offers only `auto` where a Wayland one offers the three rungs. The Unix
+client type-checks for Linux and the Windows one is a message-mode named pipe
+scoped to the logon session, where `WaitNamedPipe` with a zero timeout answers
+whether a daemon exists and `CallNamedPipe` carries one request and one answer.
+`crabsnap` itself still names Wayland in its capture, colour, daemon, hotkey and
+tray modules; paths are the first that left it.
 
 The daemon runs as the user, not as a service. It owns the pipe, the clipboard,
 the hotkeys, the tray icon, and the output list, and it creates surfaces on
@@ -726,9 +729,15 @@ uses the Fluent controls the app already has.
 
 Paths come from known folders, not environment variables: `FOLDERID_Pictures`
 for the default save directory, `FOLDERID_RoamingAppData` for the config, and
-`FOLDERID_LocalAppData` for the log. The Wayland `user-dirs.dirs` parser has no
-counterpart and is deleted from the Windows build. Output names and pin titles
-can contain characters that are legal in a title but not in a file name, so the
+`FOLDERID_LocalAppData` for the log. Only the first is wired so far, through
+`SHGetKnownFolderPath`, because the user may have moved the folder to another
+drive; the same module keeps `Screenshots/` under it, as the Wayland build does.
+The stamp is the other platform answer: epoch seconds carry no offset, so
+`SystemTimeToTzSpecificLocalTime` supplies the local calendar fields, and a
+machine with no usable zone files the shot in UTC rather than failing. The
+Wayland `user-dirs.dirs` parser has no counterpart and lives only in the Unix
+crate. Output names and pin titles can contain characters that are legal in a
+title but not in a file name, so the
 existing sanitizer needs the Windows reserved names (`CON`, `PRN`, `AUX`, `NUL`,
 `COM1` through `COM9`, `LPT1` through `LPT9`), trailing dots and spaces, and the
 long-path limit. The manifest opts into `longPathAware`; internal paths still
@@ -860,7 +869,7 @@ flaky test.
 | Clipboard, drag-and-drop, hotkeys | A copy carries text, HTML, a file list and a picture, each as every Windows format it needs; a paste is text only; hotkeys done through `RegisterHotKey` against a message-only window; drag-and-drop and delayed rendering planned |
 | Named-pipe IPC | Server done: message mode verified by `host_services`, where a client connects, sends one message and reads the answer; a worker's deferred reply is implemented but unexercised |
 | Capture via WGC and Desktop Duplication | Desktop Duplication done: one named or primary output, from a device on its adapter, f16 composed surface converted to SDR sRGB, rotation and DPI scale carried on the frame; verified against a chart of known codes on an auto colour managed desktop. HDR highlights clip, several outputs are not assembled, and WGC, the border behaviour and `WDA_EXCLUDEFROMCAPTURE` are planned |
-| The app on Windows | Started: `ui_host::connect` and `Host::languages` give an app one way in, the settings window builds and runs here, and `crabsnap-platform` is a facade over a Unix socket client and a Windows named-pipe client. `crabsnap` itself still names Wayland in capture, colour, daemon, hotkeys and paths; the tray and the ffmpeg shim are unstarted |
+| The app on Windows | Started: `ui_host::connect` and `Host::languages` give an app one way in, the settings window builds and runs here and offers only the capture backends its build has, and `crabsnap-platform` is a facade over a Unix socket client and a Windows named-pipe client plus the save path's known folders and local clock. `crabsnap` itself still names Wayland in capture, colour, daemon, hotkeys and tray; the tray and the ffmpeg shim are unstarted |
 | IME | Composition done through IMM32: open status from the frame's `ImeState`, composition and candidate windows at the caret, preedit and commit as engine events; surrounding text and `DeleteSurrounding` need TSF |
 | Packaging and signing | Planned |
 | Vulkan | Not planned; see [Is Vulkan the right renderer?](#vulkan) |

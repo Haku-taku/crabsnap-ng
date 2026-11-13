@@ -7,8 +7,9 @@ license.workspace = true
 description = "The daemon channel on a Unix session: a sequence-packet socket in the runtime directory."
 
 [lib]
-path = "src/channel.rs"
+path = "src/platform.rs"
 
 [dependencies]
 crabsnap-core = { path = "../../crabsnap-core" }
+libc = "0.2"
 rustix = { version = "1", features = ["event", "net"] }

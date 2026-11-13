@@ -4,6 +4,7 @@
 pub mod config;
 pub mod hotkeys;
 pub mod media;
+pub mod paths;
 pub mod protocol;
 pub mod transfer;
 pub mod uri_list;

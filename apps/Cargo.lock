@@ -448,6 +448,7 @@ name = "crabsnap-platform-unix"
 version = "0.1.0"
 dependencies = [
  "crabsnap-core",
+ "libc",
  "rustix",
 ]
 

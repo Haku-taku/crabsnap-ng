@@ -334,7 +334,7 @@ fn run_info(info: InfoArgs, no_daemon: bool) -> Result<(), String> {
                 "capture.backend: {}",
                 config.capture.backend.as_deref().unwrap_or("auto")
             );
-            let directory = crate::paths::shot_dir(config.shots.directory.as_deref());
+            let directory = crabsnap_platform::paths::shot_dir(config.shots.directory.as_deref());
             println!("shots.directory: {}", directory.display());
             println!(
                 "shots.format: {}",
