@@ -21,7 +21,9 @@ live in `docs/src/`; this file points at them instead of repeating them.
 - Do not add new `mod.rs` files; use `src/some_module.rs`. The existing ones are legacy. New crates
   name their library root in `Cargo.toml` (`[lib] path = "..."`) rather than defaulting to `lib.rs`.
 - User-visible strings go through Fluent i18n; never inline literals in controls.
-- No compile-time `cfg` to choose between crates or backends. Capabilities are detected at runtime.
+- No compile-time `cfg` in app code or crate bodies to choose between backends. `ui-host`'s
+  target tables pick one, one `cfg` re-export exposes it, and capability differences are runtime
+  `Option`s on `HostSession`.
 - After editing, read the change back. A tool call that reports success says the write happened, not
   that the content is what you meant.
 
