@@ -183,9 +183,13 @@ result; a partial frame that is cheaper but wrong is not a port.
 
 ### HDR and colour
 
-`DXGI_OUTPUT_DESC1` supplies the primaries, the maximum luminance, and
-`SDRWhiteLevel` in units of 1/1000 of 80 nits. `IDXGISwapChain3::SetColorSpace1`
-selects the output space.
+`DXGI_OUTPUT_DESC1` supplies the primaries, the minimum and maximum luminance,
+and the space the desktop is composing in. It carries no SDR white level — an
+earlier version of this note said it did. That value belongs to the display
+configuration, as `DISPLAYCONFIG_SDR_WHITE_LEVEL` in units of 1/1000 of 80 nits,
+and is reachable only by matching the path's `DISPLAYCONFIG_SOURCE_DEVICE_NAME`
+to the monitor's `szDevice`. `IDXGISwapChain3::SetColorSpace1` selects the output
+space.
 
 | Engine value | Windows form |
 | --- | --- |
@@ -199,7 +203,26 @@ serves Wayland serves Windows, and only the swapchain's colour space changes.
 The alternative, scRGB, would need a second present variant and a scale by
 `reference_nits / 80` that no portable code states today.
 
-The SDR white level is not a constant. It comes from the monitor description,
+Implemented in `crates/ui-platform-win32/src/presenter.rs`, which decides from
+the output before it creates a chain. An output whose `ColorSpace` is
+`DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020` gets the half-float chain and the
+PQ space; the renderer is then given a linear destination from the output's own
+description — SDR white as the reference, `MinLuminance` and `MaxLuminance` as
+the destination's floor and peak — plus the sRGB-to-BT.2020 gamut matrix. Every
+other output keeps the 8-bit chain, and an output that refuses the PQ space
+(`CheckColorSpaceSupport` without `DXGI_COLOR_SPACE_SUPPORT_FLAG_PRESENT`, or a
+failing `SetColorSpace1`) is dropped and replaced by the SDR one, so a machine
+with HDR switched off never sees the half-float path.
+
+`examples/hdr.rs` is the check. This machine's panel composes SDR, so what it
+pins is the fallback: eight-bit chain, all five grey codes unchanged. Aiming the
+renderer at the output's description anyway — 80 nits SDR white, 417.7 nits peak
+— put white at 0.486 against `encode_for_pq_output`'s 0.4859 and every other
+code within 0.0007, through the half-float frame and the copy into an SDR back
+buffer. The HDR chain itself is `[to verify]` on real hardware: a display in HDR
+reports colour space 12 and drives the branch this panel refuses.
+
+The SDR white level is not a constant. It comes from the display configuration,
 as the Wayland path takes it from `wp_color_manager_v1`. A value copied from
 the developer's own display is the same mistake the colour page records for
 PQ placement.
@@ -804,6 +827,7 @@ flaky test.
 | Area | Status |
 | --- | --- |
 | Win32 backend, D3D11 presenter | Done: window, input, DPI, clipboard text, theme, `HostSession` trait, and the process `Backend` (one pump, several windows, outputs, languages, waker); see `docs/src/rendering-backends.md` |
+| HDR swap chain | Implemented: half-float PQ chain on an output the desktop composes in HDR, 8-bit sRGB otherwise, SDR white and the luminance range from the display configuration. Measured only on an SDR panel, where the fallback and the PQ encode were checked; the HDR chain has not been presented on a display showing PQ |
 | D3D11 renderer | Done |
 | Layer surfaces | Approximated: a `WS_POPUP` tool window on the primary monitor, topmost for `Overlay`/`Top`, placed by anchor, size and margin arithmetic, `WS_EX_NOACTIVATE` for `KeyboardMode::None`, and click-through outside the published input region; `Bottom`/`Background` are not topmost, `Reserve` is ignored, and `FollowPointer` is click-to-focus |
 | Transparent surfaces and input regions | Done for a layer: `HTTRANSPARENT` is verified with `WindowFromPoint` landing on the window below. A translucent capture window is still planned |
@@ -851,8 +875,11 @@ here because the port is where they stop being harmless.
 
 The Status section on `rendering-backends.md` now names the Win32 window, the
 D3D11 device, the process `Backend`, the layer approximation, the input method's
-composition and the clipboard's formats as implemented; Vulkan is still absent,
-and HDR is the part of the port that remains.
+composition, the clipboard's formats and the HDR swap chain as implemented.
+Vulkan is still absent. What remains of stage 2 is unmeasured rather than
+unwritten: no display here composes in HDR, so the half-float chain has only been
+exercised with the renderer forced and the back buffer read back, not on a panel
+showing PQ.
 
 ## See also
 

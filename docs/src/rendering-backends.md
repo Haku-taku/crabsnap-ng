@@ -267,7 +267,36 @@ with the candidate form excluding the caret's rectangle, and an injected `a😀b
 composition arrived as a preedit of 6 bytes with the caret at its end, which is
 what an injected composition reports.
 
-Not implemented on this path: HDR.
+The swap chain follows the output it lands on into HDR. An output the desktop is
+composing in `DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020` gets a
+`R16G16B16A16_FLOAT` chain declaring the same space, and the renderer takes a
+linear destination, so the output pass writes PQ codes of BT.2020 light. Every
+other output keeps the 8-bit sRGB chain.
+
+SDR white is what linear 1.0 is shown at, and DXGI does not report it:
+`DXGI_OUTPUT_DESC1` has no field for the value, which belongs to the display
+configuration under `DISPLAYCONFIG_SDR_WHITE_LEVEL` and is found by matching that
+path's source GDI device name to the monitor's (thousandths of 80 nits: 1000 on
+this machine). The panel's own minimum and peak bound the destination's tone
+curve, and sRGB content reaches BT.2020 through the renderer's gamut matrix.
+
+An output that will not present PQ takes the SDR chain instead. The chain asks
+first — `DXGI_COLOR_SPACE_SUPPORT_FLAG_PRESENT` from `CheckColorSpaceSupport`,
+then `SetColorSpace1` — and a display whose desktop is not composing in HDR
+refuses, which is the branch measured here. The output is read once, when the
+window opens: a window dragged from an SDR monitor to an HDR one keeps the chain
+it was built with until it is reopened.
+
+Measured with `cargo run -p ui-platform-win32 --example hdr --release`. This
+machine's panel composes SDR — its output reports colour space 0 — so the probe
+pins the fallback: the chain is 8-bit and all five grey codes read back
+unchanged. Aiming the renderer at the output's own description (80 nits of SDR
+white from the display configuration, 417.7 nits peak) moved white to 0.486
+against `encode_for_pq_output`'s 0.4859 and every other code to within 0.0007,
+with the chain still 8-bit because PQ present is refused there. The HDR chain
+itself is `[unverified]`: this panel never composes in PQ, so what a real HDR
+output does with it is unmeasured. `window_scene`'s `WINDOW_CHECK` expectations
+follow whichever branch the presenter took.
 
 ### Invariants
 
@@ -393,6 +422,8 @@ shadow scenes each found defects on their first comparison run.
 | Store the window state behind a null check in the procedure | `WM_NCCREATE` is the message that hands it over, so it takes the same early return: no input, no redraw |
 | Wait for messages with `INFINITE` | An app's own deadline is only noticed between turns, and the run overshoots it |
 | Let a `WM_PAINT` reach `DefWindowProcW` unpainted | It is reposted until the thread starves; validate it and let the frame loop paint |
+| Declare PQ on a chain without asking the output | An SDR-composed output refuses `SetColorSpace1`; nothing is presented into a chain that cannot show |
+| Look for SDR white in `DXGI_OUTPUT_DESC1` | The struct has no such field; the value is in the display configuration, on the path whose source names the monitor |
 
 ## Corrections
 
@@ -645,15 +676,29 @@ caret is not; the same probe then found it at (460, 438), directly below the
 caret. `examples/ime.rs` asserts the exclusion style, the point and the rectangle
 it reads back.
 
+**The HDR design took SDR white from DXGI, which does not carry it.** The
+research note listed `DXGI_OUTPUT_DESC1::SDRWhiteLevel`; the struct has
+`MinLuminance` and `MaxLuminance` and no white level, and `IDXGIOutput6` offers
+no other query for one. The value lives in the display configuration:
+`DISPLAYCONFIG_SDR_WHITE_LEVEL` on the path whose
+`DISPLAYCONFIG_SOURCE_DEVICE_NAME` equals the monitor's `szDevice`, in
+thousandths of 80 nits (1000, or 80 nits, on this machine). With it, linear 1.0
+in the scene is the desktop's own SDR white rather than a guess. The same pass
+found the other half: an output whose desktop is not composing in HDR refuses the
+PQ colour space, so the chain asks `CheckColorSpaceSupport` first and keeps the
+8-bit chain when the answer is no — forced through anyway, the D3D11 encode
+still matched `encode_for_pq_output` to 0.0007 in an SDR buffer.
+
 ## Status
 
 Implemented: both presenters, dma-buf zero-copy, explicit sync, HDR targets,
 offscreen layers, text on both paths, every `DrawList` primitive on both paths,
 fractional scaling, a D3D11 device that renders the whole `DrawList` on
 Windows, and a Win32 window that presents it through a DXGI flip-model swap
-chain, feeds pointer, keyboard and clipboard events back to the loop, and hosts
-the gallery. Both window backends implement the portable `HostSession` trait, so
-an app's loop is written once and names no backend; the Win32 implementation is
+chain that follows its output into HDR and falls back to 8-bit sRGB, feeds
+pointer, keyboard and clipboard events back to the loop, and hosts the gallery.
+Both window backends implement the portable `HostSession` trait, so an app's
+loop is written once and names no backend; the Win32 implementation is
 built and exercised on this machine, the Wayland one is checked by reading each
 delegated signature until it is next built on Linux. The Win32 backend also
 implements the process `Backend`, so a `Host` on Windows runs several windows
@@ -665,7 +710,7 @@ publishes. An input method composes through IMM32, with the engine's preedit and
 commit events and the IME windows at the caret.
 
 Not implemented: on the Windows process loop, a selection reader; on the
-Windows window, HDR, a paste that carries more than text, the input method's
+Windows window, a paste that carries more than text, the input method's
 surrounding text (which needs TSF), and redraw during a modal resize drag;
 Vulkan. The Windows and Vulkan notes in `old/` are surveys, not code.
 
