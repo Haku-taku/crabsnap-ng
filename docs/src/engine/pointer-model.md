@@ -178,7 +178,10 @@ with its own commit — the intermediate value has to be the committed one to be
 "The pointer is on what we consume" is the same fact the input region is built from — the
 topmost consumer under the pointer — plus two states the region cannot express: a live gesture
 (a drag keeps its capture past the node's edge) and the engine menu, which has no node. The
-engine applies it only for `FollowPointer`; every other mode is the app's one-time choice.
+engine applies it only for `FollowPointer`; every other mode is the app's one-time choice. It
+travels with a frame, so a target that must act on the pointer leaving cannot wait for it: a
+still pointer builds no frame, and the departure would never be reported. A backend that sees
+the leave itself acts there, as Win32 does with `WM_MOUSELEAVE`.
 
 Checked against the Hyprland source in `/home/ollie/git/hyprland/Hyprland` (v0.56.0-224,
 `src/desktop/view/LayerSurface.cpp`, `onCommit`): the `WASLASTFOCUS && →NONE` branch clears the

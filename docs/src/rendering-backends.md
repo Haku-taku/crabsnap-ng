@@ -216,23 +216,33 @@ and `Background` open as ordinary windows, since Win32 has no supported way to s
 beneath another application. The rectangle comes from the spec: an anchored edge
 pins that side, opposite edges together stretch the surface, `margin` is the inset
 (and with a single edge the position), and `size` is honoured only where the
-anchors leave room. `KeyboardMode::None` adds `WS_EX_NOACTIVATE`, `Exclusive` calls
-`SetForegroundWindow` once the popup is shown, and `OnDemand` activates through
-`WM_MOUSEACTIVATE` only when the click lands on an area the surface consumes.
-`FollowPointer` is the same rule: Windows has no focus-follows-pointer contract, so
-the keyboard follows a click and not the pointer. `ExclusiveZone::Reserve` is
-ignored, and every layer lands on the primary monitor: the portable spec names no
-output.
+anchors leave room; a rect that reaches the monitor edge an auto-hidden taskbar
+hides behind gives that two-pixel strip back, or the bar stops coming up.
+`KeyboardMode::None` adds `WS_EX_NOACTIVATE`, `Exclusive` calls
+`SetForegroundWindow` once the popup is shown, and the other two modes activate
+through `WM_MOUSEACTIVATE` only when the click lands on an area the surface
+consumes. `FollowPointer` adds the other half of that rule: the window notes
+which window held the keyboard as the pointer arrived, and returns it when the
+pointer leaves, since the shell refuses a foreground change from a process that
+does not already hold it. Hover alone cannot take the keyboard — Windows has no
+focus-follows-pointer contract — so the pointer decides only who gets it back.
+`ExclusiveZone::Reserve` is ignored, and every layer lands on the primary
+monitor: the portable spec names no output.
 
-The engine publishes the frame's consumed areas through `set_input_region`, and a
-layer answers `WM_NCHITTEST` with `HTCLIENT` inside one of them and
-`HTTRANSPARENT` outside, which is what lets a full-screen overlay pass the pointer
-to whatever is beneath it. Measured with
+The engine publishes the frame's consumed areas through `set_input_region`, and
+the shaped window takes a hit test only inside them, which is what lets a
+full-screen overlay pass the pointer to whatever is beneath it. Two windows do
+it: the input window answers the messages and is shaped with `SetWindowRgn`, and
+the window that holds the swap chain is `WS_EX_LAYERED | WS_EX_TRANSPARENT` so
+the pointer skips it. Measured with
 `cargo run -p ui-platform-win32 --example layers`: on a 1.25-scale monitor a
 320x180 layer with a 40,24 margin landed 400x225 at (50, 30), `WindowFromPoint`
 returned the layer over its one published patch and the window beneath it
-everywhere else in the layer's rectangle, and an all-edge anchor covered the
-monitor exactly.
+everywhere else in the layer's rectangle, an all-edge anchor covered the monitor
+less the auto-hide strip the shell reports, moving off a `FollowPointer` layer
+returned the keyboard to the window beneath, and a click on the layer activated
+it. The pass to another process was measured with a form of its own, which
+logged the press only once the painted window carried both styles.
 
 A copy is published as every format its content kind has, because Windows pastes formats
 and not MIME types: text is `CF_UNICODETEXT`, `text/html` is `"HTML Format"` with four byte
@@ -683,20 +693,50 @@ with its own event, so a read and a write can be in flight together. Caught by
 `host_services`, which sends a message from a client thread and requires the
 answer back by the time the run ends.
 
-**Windows cannot hand the keyboard back to the pointer.** The port plan gave
-`keyboard: FollowPointer` a `WM_MOUSEACTIVATE` answer over consumed areas plus
-a restore of the previous foreground window on `WM_MOUSELEAVE`. The restore
-cannot work: the shell lets a process change the foreground only while it holds
-it or right after a click of its own, so the call on leave is silently refused,
-and calling it on every mouse move would fight the user across applications.
-`FollowPointer` therefore degrades to the `OnDemand` rule, a click on a consumed
-area focuses the surface, which the portable contract already allows a field to
-do. Caught by `examples/layers.rs`, which asserts the `MA_ACTIVATE` and
-`MA_NOACTIVATE` answers for each mode; "type where the pointer is" stays
-Wayland-only. The same probe pins the placement arithmetic (a 320x180 layer with
-a 40,24 margin at (50, 30) on a 1.25-scale monitor) and the input region
-(`WindowFromPoint` returns the layer over its published patch and the window
-below it elsewhere).
+**`FollowPointer` could not hand the keyboard back, because the report it waited
+for never came.** The port plan answered a click over a consumed area with
+`WM_MOUSEACTIVATE` and restored the previous foreground window on
+`WM_MOUSELEAVE`, triggered by the engine's per-frame "the pointer is on what
+this surface consumes" report. Two things were wrong with that. A still pointer
+builds no frame, so a surface that had gone idle — the normal state between
+touches — never received the report the hand-back hung on: measured in the app,
+the foreground stayed on the canvas indefinitely after the pointer left a pin,
+because the leave had been seen but no frame ever carried it to the target. And
+the window to restore cannot be read at `WM_MOUSEACTIVATE`: the activation has
+already cleared the foreground by then and `GetForegroundWindow` answers
+`HWND(0)`, so nothing was ever stored. The window now records the foreground on
+each movement over a consumed area and hands it back in the leave handler, where
+the event actually arrives; the engine's per-frame report is not consulted on
+Windows at all. Measured in the app: clicking a pin takes the foreground and
+moving off returns it within 15 ms. Caught by `examples/layers.rs`, which clicks
+a plain window, clicks a `FollowPointer` layer over it, and requires the
+foreground back on the plain window after the pointer leaves — pumping the queue
+between a click and its answer, because the activation is dispatched with the
+message rather than with the call to `mouse_event`. The same probe pins the
+placement arithmetic (a 320x180 layer with a 40,24 margin at (50, 30) on a
+1.25-scale monitor), the `MA_ACTIVATE` and `MA_NOACTIVATE` answers for each
+mode, and the input region (`WindowFromPoint` returns the layer over its
+published patch and the window below it elsewhere).
+
+**A composed layer could be painted or clicked, not both.** A swap chain shown
+through an HWND is opaque, so a layer's transparency needs
+`CreateSwapChainForComposition` and a visual; but the window that carries that
+visual still takes every click over its whole rectangle. `SetWindowRgn` shapes
+hit testing, and it also clips composed content, so shaping the window that
+presents the frame turned the pins' surroundings transparent, edges and all,
+along with their clicks. Passing a click to another process needs
+`WS_EX_LAYERED | WS_EX_TRANSPARENT`, not `WS_EX_TRANSPARENT` alone: a form in a
+second process logged nothing at the point until both styles were set, and with
+both it logged the press. A layer therefore opens as two windows — an input
+window, `WS_EX_NOREDIRECTIONBITMAP`, shaped with `SetWindowRgn` to the areas its
+frame publishes, and a visual window owned by it, carrying
+`WS_EX_LAYERED | WS_EX_TRANSPARENT` and holding the swap chain — so what is
+painted and what is clicked can differ. `WM_NCHITTEST` answering `HTTRANSPARENT`
+was tried first and cannot work across processes: the answer only routes within
+the thread that gives it. Leaving the region does produce a `WM_MOUSELEAVE` for
+a shaped window on this build, so the departure needs no polling timer.
+`examples/layers.rs` requires the leave, the click-through, and the style on the
+painted window.
 
 **The candidate list was placed in screen coordinates and read as window ones.**
 `ImmSetCandidateWindow`'s `ptCurrentPos` is relative to the client area's
@@ -740,6 +780,36 @@ exactly, and `examples/capture.rs` checks all eight codes. The same pass found t
 right after `DuplicateOutput` is empty and arrives in the mode's packing, and that a
 pointer-only frame carries a zero `LastPresentTime`; neither is the desktop.
 
+**A full-monitor layer made an auto-hidden taskbar unreachable.** With "hide the
+taskbar automatically" on, the shell stops revealing it on edge hover for as long
+as a window covers the monitor edge the taskbar hides behind — its full-screen
+detection. An overlay surface is exactly that: the monitor's rectangle, topmost,
+present the whole time. Every toolkit that fills the screen answers the same
+way: Chromium leaves `kAutoHideTaskbarThicknessPx` (2 px) of the auto-hide edge
+to the desktop, Windows Terminal does the same for a maximized or fullscreen
+window, and `DefWindowProc`'s own maximize path leaves a one-pixel sliver for
+this reason. A layer whose rect reaches the edge an auto-hidden taskbar hides
+against now gives that strip back, asked of the shell through `ABM_GETSTATE` and
+`ABM_GETTASKBARPOS` so a visible or differently placed taskbar costs nothing.
+Caught by `examples/layers.rs`, which fills the monitor and requires the
+resulting rect to be the monitor less the strip the shell itself reports; the
+reveal was watched by hand — with the strip the bar comes up at the edge, and
+without it the edge stays dead.
+
+**Every D3D11 image was sampled from a mip level nobody had written.** All
+textures in the device carry a full mip chain, because `set_sampling(.., mips)`
+may ask for one, but an image's chain is never generated: the upload passes
+`mips: false`. The sampler asked for a mip-filtering minimum with
+`MaxLOD: f32::MAX` anyway, so as soon as minification crossed LOD 0.5 — a scale
+below 1/√2, the first zoom stop past 70.7 % — it read level 1, which held
+whatever `CreateTexture2D` left there. A pin then drew as its own background:
+transparent except a one-pixel band at the left edge, which the filter still
+took from level 0. The sampler's `MaxLOD` is now 0 for a texture without mips,
+which pins minification to the level that was written. Caught by zooming a pin
+out in the app: at 0.707 an unpatched build left a 786-pixel band where the
+400x300 image had been, and the patched one drew the whole face at 0.707, 0.59
+and below.
+
 ## Status
 
 Implemented: both presenters, dma-buf zero-copy, explicit sync, HDR targets,
@@ -755,9 +825,12 @@ delegated signature until it is next built on Linux. The Win32 backend also
 implements the process `Backend`, so a `Host` on Windows runs several windows
 from one message pump, answers outputs, languages and the system clipboard, and
 serves a named-pipe channel and global hotkeys. A layer surface opens as a
-topmost, non-activating popup on the primary monitor, placed by the spec's
-anchors, size and margins, and click-through outside the areas its frame
-publishes. An input method composes through IMM32, with the engine's preedit and
+topmost popup on the primary monitor, placed by the spec's anchors, size and
+margins, painted by one window and shaped to the areas its frame publishes by
+another, so a click leaves it wherever it claims nothing; the strip an
+auto-hidden taskbar hides behind stays with the desktop, and a `FollowPointer`
+layer takes the keyboard on a click and hands it back when the pointer leaves.
+An input method composes through IMM32, with the engine's preedit and
 commit events and the IME windows at the caret. A screen capture duplicates an
 output through Desktop Duplication, asking for the surface an advanced colour
 desktop composes in and returning SDR sRGB codes.

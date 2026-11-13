@@ -79,7 +79,9 @@ the level the spec names, with `keyboard` folded into activation rules (`WS_EX_T
 `WS_EX_TOOLWINDOW`, `WS_EX_NOACTIVATE` and `WM_MOUSEACTIVATE` on Windows; `NSWindow.level` on
 macOS; the equivalent of winit's `WindowLevel` on X11). `exclusive` has no counterpart
 anywhere, and a keyboard mode that platform cannot express degrades to the closest one it can.
-That mapping is written on the types themselves; the engine never branches on it.
+That mapping is written on the types themselves; the engine never branches on it. Where a
+platform needs more than one window to honour the role — a painted surface and a shaped one on
+Windows — the extra window is the backend's own business and no app sees it.
 
 The engine's own place in this is narrow: it hands the spec to the backend and receives a
 `PresentTarget`. Whether a surface is a layer is visible to the frame contract as
@@ -308,8 +310,10 @@ explicit sync when the compositor offers it, configure-driven resize,
 fractional scaling, keyboard and IME through Wayland protocols, colour
 management where available, and lending the connection to application
 protocols through `WaylandLink`. On Windows, a decorated window and an
-approximated layer (topmost popup, click-through outside the frame's input
-region) are behind the same spec; see
+approximated layer are behind the same spec: a topmost popup that takes clicks
+only where its frame consumes them, gives up the monitor edge an auto-hidden
+taskbar hides behind, and hands the keyboard back when a pointer-following
+surface is left; see
 [Rendering Backends](../rendering-backends.md).
 
 Not implemented: macOS and X11 windows; multi-seat input; tablet and touch
