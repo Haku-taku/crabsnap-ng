@@ -171,3 +171,10 @@ settings-shortcut-cursor-right = 光标右移
 settings-shortcut-cursor-up = 光标上移
 settings-shortcut-cursor-down = 光标下移
 settings-bad-chord = { $name }：{ $chord } 不是和弦
+
+# daemon 留在桌面通知区里的那个图标。
+tray-tooltip = Crabsnap
+tray-menu-region = 截取区域
+tray-menu-output = 截取屏幕
+tray-menu-settings = 设置…
+tray-menu-quit = 退出

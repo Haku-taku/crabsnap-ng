@@ -51,6 +51,32 @@ or a BCP-47 tag and is refused, before the file is touched, when it is neither. 
 top-level `--lang`: that one only chooses the words of this run, while this one is written into
 the file.
 
+## Starting it
+
+With no argument the launch decides what the process is. Started from a terminal it shows the
+toolbar; started with no terminal at all — a desktop icon, a file manager, a session's login
+entry — it starts the daemon, because a person who double-clicked asked for the tool to be
+there, not for a window. "No terminal" is stdin, stdout and stderr all not being a terminal,
+which is exactly how those launches arrive; a shell that redirected one of them still counts.
+
+The daemon puts its icon in the [system tray](../engine/tray.md), which is where a desktop
+start can be seen and stopped: the tooltip names the tool, and the menu offers Capture Region,
+Capture Output, Settings… and Quit. A primary click is Capture Region, the tool's main action;
+a right-click opens the menu, as the desktop's own. On a platform with no tray — Linux today —
+the daemon starts anyway and loses only the icon, because the hotkeys are what it is for.
+
+A second desktop start while the daemon runs exits at once with success: the user asked for
+the tool to be running, and it is. `crabsnap daemon` keeps the strict answer and refuses with
+"a daemon is already running", because a script that starts one wants to hear about it.
+Settings… starts this binary again as `crabsnap settings`: that window owns its own connection
+and its own loop, so it cannot be a surface of the daemon.
+
+Windows builds are GUI-subsystem binaries, so a desktop start opens no console window; a
+terminal start still reaches the console through the handles it inherits, and a command's
+output is unchanged. The test harness is the exception and keeps the console subsystem, since
+a GUI one has nowhere to print its results. A failure on the desktop path has no console to
+land in: Windows shows a message box, Unix writes to stderr, which such a launch discards.
+
 ## Commands
 
 Names follow the legacy project; the mapping is deliberate, so muscle memory and scripted
@@ -102,7 +128,9 @@ symbols. Where the headers are is the platform's question, and Windows has no re
 of an MSYS2 install, and the DLLs of the same major — `avformat-<major>.dll` and its companions
 in `mingw64\bin` — are what is loaded at run time. When the
 libraries cannot be used, the `ffmpeg` program — on `PATH`, or at `[codec] program` — is the
-fallback, and it is the only process this tool ever starts. The libraries are looked for in
+fallback. It and the tray's Settings row are the only processes this tool starts: one encodes a
+format the libraries cannot, the other is this binary again as `crabsnap settings`. The
+libraries are looked for in
 `[codec] library_directory` first and then along the dynamic loader's own search path. A
 configured `program` or `library_directory` that does not exist is reported by `info formats`,
 not quietly replaced by another path. `info formats` prints each format with the encoder and
@@ -332,7 +360,8 @@ configured directory, so a scripted run never writes into the user's own folder.
 ## Status
 
 The command surface is in, on the framework host ([event loop](../engine/event-loop.md)). Bare
-`crabsnap` still shows the app's toolbar; every other invocation parses a command.
+`crabsnap` shows the toolbar from a terminal and starts the daemon without one; every other
+invocation parses a command.
 
 | Works today | Notes |
 | --- | --- |
@@ -341,7 +370,7 @@ The command surface is in, on the framework host ([event loop](../engine/event-l
 | `info config|formats|status` | `status` reports the capture backend and every output: name, logical size, position, scale and refresh |
 | `settings [--save] [...]` | the window, or with `--save` the same values written to the file and announced to the daemon |
 | `completions --shell SHELL` | generated from the same tree the parser uses |
-| `daemon [--idle SECS]` | the service: one connection, the local channel, the output list, capability probing once at start |
+| `daemon [--idle SECS]` | the service: one connection, the local channel, the output list, capability probing once at start, and the tray icon where the platform has one |
 | `quit` / `reload` | answered over the channel; either prints "no daemon is running" when none is |
 | `pin add --file PATH... [--as KIND] [-o N]` | the daemon reads, classifies and places each file on that output's canvas |
 | `pin add --color CODE [-o N]` | the daemon parses the code and opens a one-colour palette on that output |

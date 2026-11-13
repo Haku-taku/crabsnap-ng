@@ -1,11 +1,17 @@
+// The desktop starts this binary by double-click, where a console window would sit empty for
+// the daemon's whole life. From a terminal the inherited handles still reach the console, so
+// a command's output is unaffected. The test harness keeps the console subsystem: a GUI one
+// has nowhere to print its results.
+#![cfg_attr(all(windows, not(test)), windows_subsystem = "windows")]
+
 //! CrabSnap: a screenshot and pin tool on the ui engine.
 //!
 //! The process owns one compositor connection; every surface — this toolbar, the capture
 //! overlay and the pin canvases — is opened on it.
 //!
 //! Commands: `crabsnap shot output|region`, `crabsnap pin …`, `crabsnap info …`,
-//! `crabsnap settings`; run `crabsnap --help` for the tree. With no argument the app shows its
-//! toolbar.
+//! `crabsnap settings`; run `crabsnap --help` for the tree. With no argument the launch
+//! decides: a terminal shows the toolbar, a desktop icon starts the daemon.
 //! `CRABSNAP_SECONDS=n` still bounds a scripted run.
 
 mod toolbar;
@@ -25,6 +31,7 @@ mod pins;
 mod readout;
 mod run;
 mod settings_window;
+mod tray_icon;
 mod zoom;
 
 use std::cell::{Cell, RefCell};
@@ -2360,13 +2367,28 @@ fn main() -> Result<(), String> {
     let choice = language_choice(cli::prescan_lang(&args), config.as_ref())?;
     let language = load_language(choice)?;
     if args.is_empty() {
-        return toolbar(&language);
+        if has_terminal() {
+            return toolbar(&language);
+        }
+        // A desktop icon asks for the tool to be there, not for a window: the process that
+        // keeps it there is the daemon, and its failures have no console to land in.
+        return crate::daemon::ensure(language)
+            .inspect_err(|error| crabsnap_platform::alert(error));
     }
     let catalog = language.catalog();
     let Some(invocation) = cli::parse(&args, &catalog)? else {
         return Ok(());
     };
     run::run(&language, invocation)
+}
+
+/// Whether this process's words have a terminal to land in. A desktop icon, a file manager
+/// and a login session start it with no terminal at all.
+fn has_terminal() -> bool {
+    use std::io::IsTerminal;
+    std::io::stdin().is_terminal()
+        || std::io::stdout().is_terminal()
+        || std::io::stderr().is_terminal()
 }
 
 /// The app's own chrome: a layer-surface toolbar, until commands take over.

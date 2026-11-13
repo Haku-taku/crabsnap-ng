@@ -57,6 +57,7 @@
 - [Popovers and Tooltips](./engine/popovers.md)
 - [Scroll Containers](./engine/scroll.md)
 - [Keyboard Shortcuts](./engine/shortcuts.md)
+- [System Tray](./engine/tray.md)
 - [Presentation Targets](./engine/present-targets.md)
 - [Window Backend](./engine/window.md)
 - [The Event Loop](./engine/event-loop.md)

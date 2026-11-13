@@ -172,3 +172,10 @@ settings-shortcut-cursor-right = Move the cursor right
 settings-shortcut-cursor-up = Move the cursor up
 settings-shortcut-cursor-down = Move the cursor down
 settings-bad-chord = { $name }: { $chord } is not a chord
+
+# The tray icon the daemon leaves on the desktop.
+tray-tooltip = Crabsnap
+tray-menu-region = Capture Region
+tray-menu-output = Capture Output
+tray-menu-settings = Settings…
+tray-menu-quit = Quit

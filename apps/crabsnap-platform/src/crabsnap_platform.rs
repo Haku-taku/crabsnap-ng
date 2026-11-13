@@ -10,10 +10,14 @@
 pub use crabsnap_platform_ffmpeg as shim;
 
 #[cfg(unix)]
-pub use crabsnap_platform_unix::{CAPTURE_BACKENDS, Client, ClientError, address, capture, paths};
+pub use crabsnap_platform_unix::{
+    CAPTURE_BACKENDS, Client, ClientError, address, alert, capture, paths,
+};
 
 #[cfg(windows)]
-pub use crabsnap_platform_win32::{CAPTURE_BACKENDS, Client, ClientError, address, capture, paths};
+pub use crabsnap_platform_win32::{
+    CAPTURE_BACKENDS, Client, ClientError, address, alert, capture, paths,
+};
 
 #[cfg(not(any(unix, windows)))]
 compile_error!("crabsnap-platform has no local channel for this target");

@@ -11,12 +11,15 @@ use std::time::{Duration, Instant};
 use crabsnap_core::hotkeys::Shortcut;
 use crabsnap_core::media::Kind;
 use crabsnap_core::protocol::{self, Op, PinSource, Request, Response, Status};
+use ui_core::Id;
 use ui_core::draw::ImageEntry;
+use ui_core::event::PointerButton;
 use ui_i18n::Language;
 use ui_platform::SurfaceId;
 use ui_platform::host::{Effect, Host, MessageCtx, OpenOptions};
 use ui_platform::hotkeys::GlobalHotkeyError;
 use ui_platform::ipc::Reply;
+use ui_platform::tray::{Menu, MenuEntry, Tray, TrayEvent};
 
 use crate::Settings;
 use crate::capture;
@@ -73,16 +76,35 @@ enum CaptureUse {
     Pick(crate::pin::PickRequest),
 }
 
+/// 托盘菜单的每一行。点击图标本身是这台工具的主动作，菜单里的行各有各的。
+const TRAY_REGION: Id = Id::str("tray/region");
+const TRAY_OUTPUT: Id = Id::str("tray/output");
+const TRAY_SETTINGS: Id = Id::str("tray/settings");
+const TRAY_QUIT: Id = Id::str("tray/quit");
+
 /// 运行到 `quit` 请求，或空闲超时。
 pub fn run(idle: Option<u64>, language: Arc<Language>) -> Result<(), String> {
+    start(idle, language, false)
+}
+
+/// 桌面图标的那次启动：守护进程已经在跑时，这已经是用户要的结果。
+pub fn ensure(language: Arc<Language>) -> Result<(), String> {
+    start(None, language, true)
+}
+
+fn start(idle: Option<u64>, language: Arc<Language>, keep_running: bool) -> Result<(), String> {
     // 已有 daemon 时不再起一个：第二个进程永远接收不到请求，贴图会被分裂到两边。
     if crabsnap_platform::Client::connect().is_ok() {
-        return Err("a daemon is already running".into());
+        return if keep_running {
+            Ok(())
+        } else {
+            Err("a daemon is already running".into())
+        };
     }
     let backend = ui_host::connect().map_err(|error| format!("the display: {error}"))?;
     // 后端随后被 host 独占，抓取要借的那份连接在它还在手上时取下。
     let grab = capture::Session::of(&backend)?;
-    let settings = Settings::load(language)?;
+    let settings = Settings::load(Arc::clone(&language))?;
     let capture = probe(&grab, &settings)?;
     let mut host = Host::new(Box::new(backend));
     let service = Rc::new(RefCell::new(Service {
@@ -134,11 +156,42 @@ pub fn run(idle: Option<u64>, language: Arc<Language>) -> Result<(), String> {
     let last = Rc::new(Cell::new(Instant::now()));
     let activity = Rc::clone(&last);
     let address = crabsnap_platform::address();
-    host.listen(&address, move |reply, bytes, cx| {
+    if let Err(error) = host.listen(&address, move |reply, bytes, cx| {
         activity.set(Instant::now());
         answer(&mut served.borrow_mut(), reply, bytes, cx)
-    })
-    .map_err(|error| format!("channel {address}: {error}"))?;
+    }) {
+        // 两次双击撞在一起：先到的那个已经在应答，用户的意图已经满足。
+        if keep_running && crabsnap_platform::Client::connect().is_ok() {
+            return Ok(());
+        }
+        return Err(format!("channel {address}: {error}"));
+    }
+    // The icon is held for the loop's whole life: dropping it takes it out of the tray.
+    let _tray = show_tray(&mut host, &language);
+    let clicked = Rc::clone(&service);
+    host.on_tray(move |_, event, cx| {
+        match event {
+            // 左键是这台工具的主动作：截一块区域。右键的菜单由桌面自己打开。
+            TrayEvent::Click {
+                button: PointerButton::Primary,
+                ..
+            } => tray_capture(&mut clicked.borrow_mut(), CaptureUse::Region, cx),
+            TrayEvent::Menu { id } if id == TRAY_REGION => {
+                tray_capture(&mut clicked.borrow_mut(), CaptureUse::Region, cx)
+            }
+            TrayEvent::Menu { id } if id == TRAY_OUTPUT => {
+                tray_capture(&mut clicked.borrow_mut(), CaptureUse::Output, cx)
+            }
+            TrayEvent::Menu { id } if id == TRAY_SETTINGS => {
+                if let Err(error) = open_settings() {
+                    eprintln!("settings: {error}");
+                }
+            }
+            TrayEvent::Menu { id } if id == TRAY_QUIT => return Effect::Quit,
+            _ => {}
+        }
+        Effect::None
+    });
     let window = idle.filter(|seconds| *seconds > 0).map(Duration::from_secs);
     let served = Rc::clone(&service);
     host.on_turn(move |cx, turn| {
@@ -225,6 +278,62 @@ pub fn run(idle: Option<u64>, language: Arc<Language>) -> Result<(), String> {
     println!("daemon: listening on {address}");
     host.run()?;
     Ok(())
+}
+
+/// 通知区里的那个图标：工具在后台待命时，这是用户唯一看得见、能右键的地方。
+///
+/// 没有托盘的后端（今天的 Linux）只是没有这张图，daemon 照跑：热键才是它的价值。
+fn show_tray(host: &mut Host, language: &Arc<Language>) -> Option<Tray> {
+    let icon = match crate::tray_icon::tray_icon() {
+        Ok(icon) => icon,
+        Err(error) => {
+            eprintln!("tray: {error}");
+            return None;
+        }
+    };
+    let mut tray = match host.tray(icon) {
+        Ok(tray) => tray,
+        Err(error) => {
+            eprintln!("tray: {error}");
+            return None;
+        }
+    };
+    let catalog = language.catalog();
+    tray.set_tooltip(&catalog.text_by_id("tray-tooltip"));
+    tray.set_menu(Some(Menu::new(vec![
+        MenuEntry::item(
+            TRAY_REGION,
+            catalog.text_by_id("tray-menu-region").to_string(),
+        ),
+        MenuEntry::item(
+            TRAY_OUTPUT,
+            catalog.text_by_id("tray-menu-output").to_string(),
+        ),
+        MenuEntry::separator(),
+        MenuEntry::item(
+            TRAY_SETTINGS,
+            catalog.text_by_id("tray-menu-settings").to_string(),
+        ),
+        MenuEntry::item(TRAY_QUIT, catalog.text_by_id("tray-menu-quit").to_string()),
+    ])));
+    Some(tray)
+}
+
+/// 托盘上的一次点击与一次热键做同一件事：在这条连接上抓一帧。
+fn tray_capture(service: &mut Service, what: CaptureUse, cx: &mut MessageCtx<'_>) {
+    if let Err(error) = start_capture(service, what, cx) {
+        eprintln!("tray: {error}");
+    }
+}
+
+/// 设置窗口有自己的循环和自己的连接，所以它是另一个进程：同一份二进制的 `settings`。
+fn open_settings() -> Result<(), String> {
+    let program = std::env::current_exe().map_err(|error| format!("this program: {error}"))?;
+    std::process::Command::new(program)
+        .arg("settings")
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("settings: {error}"))
 }
 
 /// 一条请求的答案，以及它是否要结束守护进程。

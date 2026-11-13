@@ -20,6 +20,7 @@ without their reasons.
 | Liquid Glass | Apple HIG plus the two local glass implementations |
 | GPU presentation, damage, effects | Skia sampling and filters, GPUI's wgpu backend, egui's tessellator, `wayland.xml`, wlroots |
 | Hit testing and input routing | egui `Sense`/`interact`, GPUI's per-layer hit test |
+| System tray | Win32 `Shell_NotifyIcon` and `NOTIFYICONDATA` (the version 4 callback layout), Qt `QSystemTrayIcon` and its `org.kde.StatusNotifierItem` adaptor, Electron `Tray`, tray-icon's Windows implementation |
 | Ownership, sharing, copies | GPUI `SharedString`, egui `Arc<Galley>`, Bevy `RenderAsset`, rowan, cosmic-text `ShapeBuffer`; the rules are in [Ownership and Copies](../conventions/ownership.md) |
 
 ## Local copies
@@ -34,6 +35,7 @@ On this machine, already downloaded — no network needed:
 | cosmic-text 0.19.0 | `~/.cargo/registry/src/*/cosmic-text-0.19.0/src/` |
 | GTK 4 layout contract | `/usr/include/gtk-4.0/gtk/gtklayoutmanager.h` |
 | Qt 6 layout contract | `/usr/include/qt6/QtWidgets/qlayoutitem.h` |
+| Qt 6 tray contract | `/usr/include/qt6/QtWidgets/qsystemtrayicon.h`, `/usr/include/qt6/QtGui/6.12.0/QtGui/private/qstatusnotifieritemadaptor_p.h` |
 
 Widget reference clones live in `~/git/widget-ref/`: `flutter` (sparse:
 `painting`, `material`, `animation`), `fluent_ui`, `winui`,
