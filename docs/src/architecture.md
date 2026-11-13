@@ -37,9 +37,10 @@ The scan strips `//` comments before looking, so a banned token in a comment is
 not a violation. Dev-dependencies are exempt, which is why `ui-gallery` can be
 portable while its examples use the Wayland backend.
 
-`PLATFORM_BOUND` today: `ui-gpu-egl`, `ui-platform-wayland`, `ui-demo`.
-Everything else is `PORTABLE`, including the painter: `ui-gpu-scene` decides what
-to draw and `ui-paint-gpu` is its GL device, both free of OS APIs.
+`PLATFORM_BOUND` today: `ui-gpu-egl`, `ui-gpu-d3d11`, `ui-platform-wayland`,
+`ui-demo`. Everything else is `PORTABLE`, including the painter: `ui-gpu-scene`
+decides what to draw, and `ui-paint-gpu` (GL) and `ui-gpu-d3d11` (Windows) are
+its devices behind that trait.
 
 ## Conventions that no test enforces
 
@@ -62,9 +63,10 @@ These are real rules, enforced by review rather than by cargo:
 ## Backends
 
 - **Presentation** has a CPU path (`ui-paint`) and a GPU path (`ui-gpu-scene`
-  driving `ui-paint-gpu`'s GL device, onto a target from `ui-gpu-egl`). The
-  Wayland backend selects the GPU path with its `gpu` feature; without it, it
-  presents through shared memory. See [Rendering Backends](./rendering-backends.md).
+  driving a device: `ui-paint-gpu`'s GL device onto a target from `ui-gpu-egl`,
+  or `ui-gpu-d3d11` offscreen on Windows). The Wayland backend selects the GPU
+  path with its `gpu` feature; without it, it presents through shared memory.
+  See [Rendering Backends](./rendering-backends.md).
 - **Text** is split between the contract (`ui-text`: font stacks, shaping
   output, fallback) and a provider crate (`ui-text-fontique`). The system font
   stack is the provider's `system` feature, off by default so unit tests do not
@@ -83,6 +85,7 @@ These are real rules, enforced by review rather than by cargo:
 | A primitive, batch, or CPU raster rule | `ui-paint` |
 | A batch walk, layer, damage band, or pass order | `ui-gpu-scene` |
 | A GLSL program or GL resource | `ui-paint-gpu` |
+| An HLSL program, D3D object, or DXGI resource | `ui-gpu-d3d11` |
 | An EGL, gbm, or dma-buf detail | `ui-gpu-egl` |
 | Window, surface, frame loop, presentation target | `ui-platform` |
 | Wayland protocol or buffer handling | `ui-platform-wayland` |

@@ -8,13 +8,14 @@ add a backend, and where the test does not look.
 
 `crates/ui-platform/tests/platform_boundary.rs` holds them.
 
-`PLATFORM_BOUND` — three crates, each with a written reason:
+`PLATFORM_BOUND` — four crates, each with a written reason:
 
 | Crate | Reason in the test |
 | --- | --- |
 | `ui-platform-wayland` | Wayland window backend: `wayland-client`, `libc`, `xkbcommon` |
 | `ui-demo` | Showcase bootstrap: opens a Wayland window and exits the process |
 | `ui-gpu-egl` | EGL device + GBM + dma-buf: unix fds, `libc`, `libgbm` |
+| `ui-gpu-d3d11` | D3D11 device: COM, DXGI and d3dcompiler are Win32 APIs, and the crate is empty off Windows |
 
 Everything else is `PORTABLE`: `ui-core`, `ui-color-hct`, `ui-design`,
 `ui-gallery`, `ui-gpu-scene`, `ui-i18n`, `ui-paint`, `ui-paint-gpu`,
@@ -64,8 +65,8 @@ Review has to catch these. The test is a floor, not a proof.
      `set_ime`, `commit_pending`.
    - Reuse the GPU painter by implementing `ui_gpu_scene::RenderTarget` (`size`,
      `target_id`) for the target it draws into. A different graphics API needs
-     its own `ui_gpu_scene::Device` and a device crate beside `ui-paint-gpu`,
-     not just this trait.
+     its own `ui_gpu_scene::Device` and a device crate beside `ui-paint-gpu`
+     and `ui-gpu-d3d11`, not just this trait.
 5. Detect capabilities at runtime and pass them down. Gate the backend with a
    Cargo feature if it has an optional dependency;
    `ui-platform-wayland/gpu` is the model.

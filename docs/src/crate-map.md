@@ -33,6 +33,7 @@ contract to the lowest crate that can express it.
 | --- | --- | --- |
 | `ui-gpu-egl` | EGL display and context, GBM buffers, dma-buf export, explicit sync, the render node to use | Be a dependency of a portable crate |
 | `ui-paint-gpu` | The GL device the scene draws through: shaders, vertex arrays, texture storage, framebuffers | Be a dependency of a portable crate |
+| `ui-gpu-d3d11` | The D3D11 device: COM objects, generated HLSL and its constant-buffer layout, DXGI textures and targets; empty off Windows | Be a dependency of a portable crate |
 | `ui-platform-wayland` | The Wayland XDG target: protocol glue, `wl_shm` buffers, input, clipboard, presenting | Be a dependency of a portable crate |
 | `ui-demo` | Shared showcase bootstrap for the demo binaries: window, presenter, bundled faces, loop | Be a dependency of a portable crate |
 
@@ -53,6 +54,7 @@ Read each line as "depends on". There are no other internal edges.
 | `ui-design` | `ui-core`, `ui-color-hct` |
 | `ui-platform` | `ui-core`, `ui-paint`, `ui-text`, `ui-text-fontique`, `ui-math` |
 | `ui-paint-gpu` | `ui-core`, `ui-gpu-scene` |
+| `ui-gpu-d3d11` | `ui-gpu-scene`; `ui-core` for its example |
 | `ui-platform-wayland` | `ui-core`, `ui-paint`, `ui-platform`, `ui-text`, `ui-text-fontique`, and `ui-paint-gpu` with `ui-gpu-egl` under `gpu` |
 | `ui-style` | `ui-core`, `ui-design` |
 | `ui-widgets` | `ui-core`, `ui-design`, `ui-style`, `ui-platform`, `ui-i18n` |

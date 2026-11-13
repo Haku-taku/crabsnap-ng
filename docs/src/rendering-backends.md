@@ -14,11 +14,12 @@ scans out directly.
 
 ## GPU path
 
-Three crates split the path. `ui-gpu-scene` decides what to draw — batches, the
-layer stack, damage bands, pass order — and talks to a `Device` trait, naming no
-graphics API. `ui-paint-gpu` implements that trait on GL: shaders, vertex
-arrays, texture storage, framebuffers. `ui-gpu-egl` owns the EGL context and the
-dma-buf target. The chain is:
+The path splits at a `Device` trait. `ui-gpu-scene` decides what to draw —
+batches, the layer stack, damage bands, pass order — and names no graphics API.
+`ui-paint-gpu` implements that trait on GL: shaders, vertex arrays, texture
+storage, framebuffers. `ui-gpu-egl` owns the EGL context and the dma-buf target;
+`ui-gpu-d3d11` is the same trait on D3D11, described below. The Wayland chain
+is:
 
 1. `gbm_bo_create(..., GBM_FORMAT_ARGB8888, GBM_BO_USE_RENDERING)`.
 2. Export fd, stride, offset, modifier; import as `EGLImage` with
@@ -41,6 +42,35 @@ for 50 ms, then drawing proceeds anyway rather than blocking the UI.
 Without the protocol, `glFinish` runs before attach and commit. The nested test
 session does not advertise the protocol, so present timings measured there come
 from the fallback.
+
+### The Windows device
+
+`ui-gpu-d3d11` implements the same `Device` trait on D3D11 and is empty off
+Windows: a device that cannot exist without COM and DXGI has nothing to fall
+back to. Both stages' constant buffer is generated from one table with explicit
+`packoffset`, and the byte offsets the device writes into come back from the
+same function, so the shader's layout and the upload cannot describe different
+buffers. Instance layouts and primitive semantics stay the scene's; only the API
+calls are the backend's.
+
+Four API facts shape the code:
+
+- A sampler array takes a literal index only, so a unit chosen by a uniform
+  becomes a two-way `if` (`sample_unit`) rather than `u_samplers[unit]`.
+- A scalar array takes one constant register per element, so the tap weights are
+  `float4[9]` read through `tap_weight`, not `float[33]`.
+- `ClearRenderTargetView` ignores the scissor, so a damage band clears through
+  `ID3D11DeviceContext1::ClearView` and falls back to the plain clear on a
+  context without it.
+- Device rows grow downward and D3D's viewport grows upward, so the flip lives
+  once, in `device_to_ndc`.
+
+`cargo run -p ui-gpu-d3d11 --example d3d11_scene` compiles all eighteen programs
+through d3dcompiler and reads back one 160×120 scene holding a rounded rect, an
+ellipse, a line, a sector and a blurred layer over an opaque backdrop, checking
+eight invariants: shape edges land where the primitive says, off-shape pixels
+keep the backdrop, and the layer composite keeps its orientation. It does not
+compare against the GL backend; that needs a Linux run.
 
 ### Invariants
 
@@ -153,6 +183,11 @@ shadow scenes each found defects on their first comparison run.
 | Map the destination box onto texel indices | Every texel boundary sits half a texel early |
 | Mix a logical rect with a device-pixel band | The blur covers a fraction of the box at fractional scaling |
 | Square every corner the intersection matches no clip | A scrolled rounded card leaks through its own corner |
+| Index a sampler array by a uniform, as GLSL does | `X3512: sampler array index must be a literal expression` |
+| Declare a convolution's weights as `float weights[33]` | One register per element: the next member's `packoffset` collides |
+| Pass a mip-chained target to `CopyResource` | The copy fails, silently, and the readback is zeros |
+| Clear a damage band with `ClearRenderTargetView` | The whole frame is cleared and the band's promise is gone |
+| Leave `SV_POSITION` out of the pixel shader's struct | Every input reads its neighbouring register |
 
 ## Corrections
 
@@ -291,14 +326,42 @@ unit tests pass, which covers the batch and scissor geometry and not the device.
 The GL backend, the Wayland wiring and every example still need a Linux run
 before this paragraph can claim more.
 
+**The D3D11 readback returned zeros from a frame that had rendered.** `read_pixels`
+copied the target with `CopyResource` into a one-level staging texture, and the
+targets carry a full mip chain so that `set_sampling(.., mips)` works on any of
+them; D3D11 wants both sides of `CopyResource` to agree on dimensions, format
+*and* mip count, so the call failed and the example read the staging buffer's
+zeros. The device's own copy has no error return to check, which made the
+failure look like a broken clear or a broken draw: a probe that cleared a target
+red and blitted it into a second one showed both working before the readback
+did. The readback now copies subresource 0 with `CopySubresourceRegion`, which
+does not care how many levels the source has. Caught by `[1]` of `d3d11_scene`,
+which failed with an all-zero readback; the example is what makes the silent
+path visible at all.
+
+**Every D3D11 varying arrived as zero.** The pixel shader's input struct did not
+declare `SV_POSITION`, so its inputs were numbered from register 0 while the
+vertex shader's outputs start at register 1, and the rasteriser fed each input
+from the neighbouring register instead of renumbering the pair. The symptoms
+pointed elsewhere: every shape drew as a full quad in its instance colour, in the
+right place, and a vertex shader that wrote a constant into a varying still lost
+it. It took a fragment shader that returned `v_local` and printed the same value
+at every pixel to show the inputs were not the ones the vertex stage wrote. `PsIn` now opens with `SV_POSITION` like
+`VsOut`, so the two signatures describe one register layout. Caught by `[2]` and
+`[7]` of `d3d11_scene` — a rounded corner read as filled and the sector's arc
+read as empty — which are the two checks that only pass when a *shape*, not a
+rectangle, reaches the target.
+
 ## Status
 
 Implemented: both presenters, dma-buf zero-copy, explicit sync, HDR targets,
 offscreen layers, text on both paths, every `DrawList` primitive on both paths,
-fractional scaling.
+fractional scaling, and a D3D11 device that renders the whole `DrawList`
+offscreen on Windows.
 
-Not implemented: any non-Wayland platform, and Vulkan. The Windows and Vulkan
-notes in `old/` are surveys, not code.
+Not implemented: a Windows window or present path — the D3D11 device has no
+target a compositor scans out yet — and Vulkan. The Windows and Vulkan notes in
+`old/` are surveys, not code.
 
 ## See also
 
