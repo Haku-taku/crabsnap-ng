@@ -279,34 +279,39 @@ what an injected composition reports.
 
 The swap chain follows the output it lands on into HDR. An output the desktop is
 composing in `DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020` gets a
-`R16G16B16A16_FLOAT` chain declaring the same space, and the renderer takes a
-linear destination, so the output pass writes PQ codes of BT.2020 light. Every
-other output keeps the 8-bit sRGB chain.
+`R16G16B16A16_FLOAT` chain, and the renderer takes a linear destination, so the
+output pass writes light rather than sRGB codes. The space the chain declares is
+the first one it will present: PQ in BT.2020, or scRGB
+(`DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709`) — linear light in sRGB primaries
+whose 1.0 is 80 nits, which is what the desktop composites in and what Chromium
+declares for windowed HDR. PQ takes BT.2020 through the renderer's gamut matrix;
+scRGB shares the working space's primaries and takes the identity. Every other
+output keeps the 8-bit sRGB chain.
 
 SDR white is what linear 1.0 is shown at, and DXGI does not report it:
 `DXGI_OUTPUT_DESC1` has no field for the value, which belongs to the display
 configuration under `DISPLAYCONFIG_SDR_WHITE_LEVEL` and is found by matching that
 path's source GDI device name to the monitor's (thousandths of 80 nits: 3000, or
 240 nits, on this machine). The panel's own minimum and peak bound the destination's tone
-curve, and sRGB content reaches BT.2020 through the renderer's gamut matrix.
+curve.
 
-An output that will not present PQ takes the SDR chain instead. The chain asks
-first — `DXGI_COLOR_SPACE_SUPPORT_FLAG_PRESENT` from `CheckColorSpaceSupport`,
-then `SetColorSpace1` — and a display whose desktop is not composing in HDR
-refuses, which is the branch measured here. The output is read once, when the
-window opens: a window dragged from an SDR monitor to an HDR one keeps the chain
-it was built with until it is reopened.
+An output that will not present either space takes the SDR chain instead. The
+chain asks first — `DXGI_COLOR_SPACE_SUPPORT_FLAG_PRESENT` from
+`CheckColorSpaceSupport`, then `SetColorSpace1` — and a display whose desktop is
+not composing in HDR refuses both, which is the branch the earlier probe measured
+here. The output is read once, when the window opens: a window dragged from an
+SDR monitor to an HDR one keeps the chain it was built with until it is reopened.
 
-Measured with `cargo run -p ui-platform-win32 --example hdr --release`. This
-machine's panel composes SDR — its output reports colour space 0 — so the probe
-pins the fallback: the chain is 8-bit and all five grey codes read back
-unchanged. Aiming the renderer at a destination of 80 nits of SDR white and the
-panel's 417.7-nit peak moved white to 0.486 against `encode_for_pq_output`'s
-0.4859 and every other code to within 0.0007,
-with the chain still 8-bit because PQ present is refused there. The HDR chain
-itself is `[unverified]`: this panel never composes in PQ, so what a real HDR
-output does with it is unmeasured. `window_scene`'s `WINDOW_CHECK` expectations
-follow whichever branch the presenter took.
+Measured with `cargo run -p ui-platform-win32 --example hdr --release` on this
+machine's panel (SDR white 240 nits, black 0.035 nit, peak 470, with the desktop
+composing in HDR). `CheckColorSpaceSupport` answered 0 for PQ, 3 for scRGB and 0 for the
+8-bit space, on a window chain and a composition chain alike, so the probe pins
+the scRGB path: the buffer holds linear light in 80-nit units, where sRGB 128
+reads back as 0.6471 against `decode(0.502) × 240/80 = 0.6476`, and white — 240
+nits, 3.0 — clamps at 1.0 in the 8-bit readback. The probe also refuses a
+destination whose transform would leave the codes where sRGB put them.
+`window_scene`'s `WINDOW_CHECK` expectations follow whichever branch the
+presenter took.
 
 ### Invariants
 
@@ -319,8 +324,10 @@ follow whichever branch the presenter took.
 - Partial bands are disabled under supersampling or HDR: the full frame is drawn.
 - A band grows over every reader it touches (a frost's box, a layer whose chain
   reads neighbours), and a layer it stays clear of is skipped whole.
-- A capture reads the frame before the output pass, so it is an SDR picture;
-  `read_pixels` on the surface returns the bytes the compositor got.
+- A capture reads the frame before the output pass, so it holds the scene's own
+  rendition — sRGB codes on an SDR destination, linear light on an HDR one — never
+  the encoded surface; `read_pixels` on the surface returns the bytes the
+  compositor got.
 - A size change adds full damage. Without it, bands outside the reported
   region keep old pixels.
 
@@ -766,6 +773,22 @@ PQ colour space, so the chain asks `CheckColorSpaceSupport` first and keeps the
 8-bit chain when the answer is no — forced through anyway, the D3D11 encode
 still matched `encode_for_pq_output` to 0.0007 in an SDR buffer.
 
+**The HDR chain was assumed to be PQ, and this panel presents scRGB.** The float
+chain declared `DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020` and dropped to the
+8-bit chain whenever `CheckColorSpaceSupport` said no, which was read as "this
+display is not showing HDR". On an HDR desktop this machine answers 0 for PQ, 3
+for scRGB and 0 for the 8-bit space — the same on a window chain and on a
+composition chain — so every surface presented SDR while the captures already held
+float light, and the HDR went missing at the last step: a picture that captured
+240-nit white looks like a program that did not capture HDR at all. scRGB
+(`DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709`) is the space DWM composites in and the
+one Chromium declares for windowed HDR, so the chain now takes the first space it
+will present and the renderer carries that choice into a new `OutputScRgb` pass,
+which scales the scene's white into 80-nit units and writes the light unencoded.
+Caught by `examples/hdr.rs` on both chain kinds: sRGB 128 reads back 0.6471
+against `decode(0.502) × 240/80 = 0.6476`, and the probe fails a destination whose
+transform would leave the codes where sRGB put them.
+
 **Capture took the desktop's 8-bit surface at face value.** `IDXGIOutput1::DuplicateOutput`
 always hands back BGRA8, and on an auto colour managed desktop that is the composed float
 surface clipped: the first probe compared one drawn colour with the captured one and read
@@ -816,7 +839,8 @@ Implemented: both presenters, dma-buf zero-copy, explicit sync, HDR targets,
 offscreen layers, text on both paths, every `DrawList` primitive on both paths,
 fractional scaling, a D3D11 device that renders the whole `DrawList` on
 Windows, and a Win32 window that presents it through a DXGI flip-model swap
-chain that follows its output into HDR and falls back to 8-bit sRGB, feeds
+chain that follows its output into HDR in whichever of PQ and scRGB that output
+presents and falls back to 8-bit sRGB, feeds
 pointer, keyboard and clipboard events back to the loop, and hosts the gallery.
 Both window backends implement the portable `HostSession` trait, so an app's
 loop is written once and names no backend; the Win32 implementation is

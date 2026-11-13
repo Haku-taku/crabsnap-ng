@@ -28,11 +28,12 @@ fn main() -> Result<(), String> {
         match capture.grab(Duration::from_secs(3)) {
             Ok(frame) => {
                 let storage = frame.colour.storage;
+                let peak = peak_light(&frame);
                 let output = frame.output.clone();
                 let mut shot = rendition(&frame.into_image());
                 shot.output = output;
                 println!(
-                    "{}: {}x{} stride {} scale {} output {} mean {:.1} storage {:?} after {:?}",
+                    "{}: {}x{} stride {} scale {} output {} mean {:.1} storage {:?} peak {peak:.2} after {:?}",
                     capture.name(),
                     shot.width,
                     shot.height,
@@ -112,6 +113,34 @@ fn compare(frames: &[(&'static str, Frame)]) {
             "{a_name} vs {b_name}: mean {:.2} codes, worst {worst}",
             total as f64 / counted as f64
         );
+    }
+}
+
+/// The brightest channel in the frame's own units: linear scRGB light for a float frame, where
+/// 1.0 is 80 nits (this display's SDR white lands at 3.0), or an 8-bit code as a fraction.
+fn peak_light(frame: &Frame) -> f32 {
+    match frame.format {
+        PixelFormat::Rgba16F => frame
+            .pixels
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .step_by(97)
+            .flat_map(|texel| {
+                (0..3).map(move |channel| {
+                    let low = texel[channel * 2];
+                    let high = texel[channel * 2 + 1];
+                    ui_core::colour::half_to_f32(u16::from_le_bytes([low, high]))
+                })
+            })
+            .fold(0.0f32, f32::max),
+        PixelFormat::Rgba8 => frame
+            .pixels
+            .iter()
+            .step_by(389)
+            .map(|code| f32::from(*code) / 255.0)
+            .fold(0.0f32, f32::max),
+        _ => f32::NAN,
     }
 }
 

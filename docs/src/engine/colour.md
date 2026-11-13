@@ -71,6 +71,17 @@ If encoding lived in several places, a change to primaries or tone mapping
 would have as many copies as there are output paths, and two disagreeing
 copies show up as a colour cast on one path only.
 
+## How a linear destination is encoded
+
+A linear destination also states which encoding its bytes carry.
+`LinearEncoding::Pq` is PQ over BT.2020, which is what a Wayland colour manager
+asks for; `LinearEncoding::ScRgb` is linear light in sRGB primaries whose 1.0 is
+`SCRGB_WHITE_NITS` (80), which is what a DXGI float swap chain carries on an
+advanced-colour display. The two differ in gamut and in where white sits, so the
+renderer keeps the choice and the output pass has one variant per encoding. The
+scRGB variant scales the scene's reference white into 80-nit units and writes the
+light unencoded; PQ leaves that to `encode_for_pq_output`.
+
 ## Blending domain
 
 The SDR path blends encoded values. This is deliberate, and the difference is
