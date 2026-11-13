@@ -35,7 +35,8 @@ Only one boundary is checked by a test:
 
 The scan strips `//` comments before looking, so a banned token in a comment is
 not a violation. Dev-dependencies are exempt, which is why `ui-gallery` can be
-portable while its examples use the Wayland backend.
+portable while its examples use a platform backend — named per target in its
+manifest, since a target can only name the backends that compile there.
 
 `PLATFORM_BOUND` today: `ui-gpu-egl`, `ui-gpu-d3d11`, `ui-platform-wayland`,
 `ui-platform-win32`, `ui-demo`. Everything else is `PORTABLE`, including the

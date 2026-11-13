@@ -106,10 +106,49 @@ the window to 720×480, and reads it back again. Verified on Windows 11 at 1.25
 device pixels per logical unit (1200×800 and 720×480 client areas): all four
 probes passed at both extents. `WINDOW_DUMP=path` writes the frame as a PPM.
 
-Not implemented on this path: pointer, keyboard, clipboard and IME — the window
-pump translates no input and the `SceneTarget` hooks stay at their no-op
-defaults — layer surfaces, which `Win32Window::new` refuses with
-`UnsupportedRole`, and HDR.
+### The Windows window as a frame host
+
+The window is also the driver's `FrameHost`, so the engine decides when to turn
+and no app pumps messages itself. A Win32 window has no frame callback:
+`wait_for_frame` calls `DwmFlush`, which returns once the composition pass that
+will show the presented frame has been submitted — the pacing point a
+`wl_surface` frame callback marks — and sleeps 8 ms instead when composition is
+off and there is nothing to flush. `can_draw` is always true, because unlike a
+Wayland surface there is no configure round trip that can withhold a buffer.
+
+Input leaves the window procedure as `ui_core::Event`: cursor motion plus a
+`TrackMouseEvent`-armed leave, the three buttons with `SetCapture` as the
+implicit grab a compositor would give, `WM_MOUSEWHEEL` in notches of 48 logical
+units, named keys and command chords from `WM_KEYDOWN`, text from `WM_CHAR`, and
+`Modifiers` whenever `GetKeyState` disagrees with the last report. Positions are
+divided by the window's DPI so input and layout share logical units. Focus,
+extent and scale changes carry no event of their own and are reported as a
+silent change, which still owes a frame. `WM_PAINT` is validated at once and
+reported the same way, because the frame loop is what paints. The clipboard
+carries `CF_UNICODETEXT`; the app colour scheme comes from
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme`,
+read on every poll.
+
+`ui-platform-win32::Session` owns window, presenter and driver in that teardown
+order and offers the same `open`/`tick`/`finish` shape as the Wayland session, so
+the gallery reaches both through the seam in
+`crates/ui-gallery/examples/gallery/shell.rs`: the `Session` type is an alias per
+target, and everything else the gallery asks of its host is a capability
+function, so a backend that cannot answer says so and the report omits the
+number instead of printing a zero. Measured on Windows 11 at 1.25 device pixels
+per logical unit: the gallery draws its three control sets, a posted
+`WM_LBUTTONDOWN`/`WM_LBUTTONUP` on the MD3 switch flipped it and built the next
+frame, an animated page ran at 184 frames per second against a 275 Hz display,
+and an idle page settles to four to six turns a second.
+
+A frame cannot be drawn *during* a modal sizing drag. `DefWindowProcW` runs the
+sizing loop on this thread, so the app loop is blocked inside it until the drag
+ends; DWM stretches the last frame across the growing window, and the first
+crisp frame is built when the button comes up. A re-entrant draw or a non-modal
+sizing path is what would lift that, and neither is implemented.
+
+Not implemented on this path: IME composition, non-text clipboard formats,
+layer surfaces, which `Win32Window::new` refuses with `UnsupportedRole`, and HDR.
 
 ### Invariants
 
@@ -232,6 +271,9 @@ shadow scenes each found defects on their first comparison run.
 | Read a flip chain's buffer 0 after `Present` | After the flip it is the next, blank storage |
 | `ResizeBuffers` while a target still holds the back buffer | The call fails on the live reference |
 | Give a `GENERATE_MIPS` texture only one bind flag | `CreateTexture2D` returns `E_INVALIDARG` |
+| Store the window state behind a null check in the procedure | `WM_NCCREATE` is the message that hands it over, so it takes the same early return: no input, no redraw |
+| Wait for messages with `INFINITE` | An app's own deadline is only noticed between turns, and the run overshoots it |
+| Let a `WM_PAINT` reach `DefWindowProcW` unpainted | It is reposted until the thread starves; validate it and let the frame loop paint |
 
 ## Corrections
 
@@ -409,16 +451,39 @@ reads a shader resource view and writes a render target view of one resource.
 Caught by `window_scene`'s first frame, the first thing in the tree to draw
 text through the device.
 
+**The Win32 window took no input and never redrew.** `window_proc` read
+`GWLP_USERDATA`, and when it was null it returned to `DefWindowProcW`.
+`WM_NCCREATE` is the message that carries the state pointer in
+`CREATESTRUCTW.lpCreateParams`, so it took that same early return and the
+pointer was never stored: every message after it went to the default procedure,
+which is why the window appeared, painted once, and then only changed when DWM
+stretched a frame across a resize. `WM_NCCREATE` is now answered before the
+lookup, and the extra strong count taken for the procedure is released in
+`WM_NCDESTROY`, which runs even when a later step of creation fails. Caught by
+`cargo run -p ui-platform-win32 --example input_probe`, which posts a move, a
+click, a notch, a character and a key and requires all seven translations, and
+by posting a real click at the gallery's switch, which flipped it and built the
+next frame.
+
+**The Win32 message wait had no deadline.** `wait_until(None)` passed `INFINITE`
+to `MsgWaitForMultipleObjectsEx`, so a run with `GALLERY_SECONDS=2` took 8.6 s:
+the gallery's lifetime, like a scripted probe's next step, can only be noticed
+between turns, and the loop was asleep until unrelated input woke it. The wait
+is now the caller's timeout capped at one second, with 250 ms when there is
+none — the same bound the Wayland backend carries.
+
 ## Status
 
 Implemented: both presenters, dma-buf zero-copy, explicit sync, HDR targets,
 offscreen layers, text on both paths, every `DrawList` primitive on both paths,
 fractional scaling, a D3D11 device that renders the whole `DrawList` on
 Windows, and a Win32 window that presents it through a DXGI flip-model swap
-chain.
+chain, feeds pointer, keyboard and clipboard events back to the loop, and hosts
+the gallery.
 
-Not implemented: input, clipboard, IME, layer surfaces and HDR on the Windows
-window; Vulkan. The Windows and Vulkan notes in `old/` are surveys, not code.
+Not implemented: IME, non-text clipboard formats, layer surfaces and HDR on the
+Windows window, redraw during a modal resize drag; Vulkan. The Windows and
+Vulkan notes in `old/` are surveys, not code.
 
 ## See also
 

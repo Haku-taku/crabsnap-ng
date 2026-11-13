@@ -16,7 +16,7 @@ add a backend, and where the test does not look.
 | `ui-demo` | Showcase bootstrap: opens a Wayland window and exits the process |
 | `ui-gpu-egl` | EGL device + GBM + dma-buf: unix fds, `libc`, `libgbm` |
 | `ui-gpu-d3d11` | D3D11 device: COM, DXGI and d3dcompiler are Win32 APIs, and the crate is empty off Windows |
-| `ui-platform-win32` | Win32 window + DXGI swap chain: user32 and dxgi are Windows APIs, and the crate is empty off Windows |
+| `ui-platform-win32` | Win32 window, input and DXGI swap chain: user32 and dxgi are Windows APIs, and the crate is empty off Windows |
 
 Everything else is `PORTABLE`: `ui-core`, `ui-color-hct`, `ui-design`,
 `ui-gallery`, `ui-gpu-scene`, `ui-highlight`, `ui-i18n`, `ui-math`, `ui-paint`,

@@ -34,7 +34,7 @@ contract to the lowest crate that can express it.
 | `ui-gpu-egl` | EGL display and context, GBM buffers, dma-buf export, explicit sync, the render node to use | Be a dependency of a portable crate |
 | `ui-paint-gpu` | The GL device the scene draws through: shaders, vertex arrays, texture storage, framebuffers | Be a dependency of a portable crate |
 | `ui-gpu-d3d11` | The D3D11 device: COM objects, generated HLSL and its constant-buffer layout, DXGI textures and targets; empty off Windows | Be a dependency of a portable crate |
-| `ui-platform-win32` | The Win32 window and its DXGI flip-model swap chain: the `SceneTarget` the engine presents through on Windows, the persistent frame target and the copy into the back buffer | Be a dependency of a portable crate |
+| `ui-platform-win32` | The Win32 window and its DXGI flip-model swap chain: the `SceneTarget` the engine presents through on Windows, the persistent frame target and the copy into the back buffer, the message pump's input and clipboard, the refresh/scale/theme queries, and the `Session` host | Be a dependency of a portable crate |
 | `ui-platform-wayland` | The Wayland XDG target: protocol glue, `wl_shm` buffers, input, clipboard, presenting | Be a dependency of a portable crate |
 | `ui-demo` | Shared showcase bootstrap for the demo binaries: window, presenter, bundled faces, loop | Be a dependency of a portable crate |
 
