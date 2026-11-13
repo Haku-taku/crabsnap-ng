@@ -12,7 +12,8 @@ crabsnap-core = { path = "../crabsnap-core" }
 crabsnap-platform = { path = "../crabsnap-platform" }
 clap_complete = "4.6"
 log = "0.4"
-image = { version = "0.25", default-features = false, features = ["png"] }
+# `ico` is for `examples/icon.rs`, which writes the executable's icon from the tray's drawing.
+image = { version = "0.25", default-features = false, features = ["png", "ico"] }
 png = "0.18"
 # An SVG is parsed by usvg and rasterized by resvg at the size the pin draws. The font
 # database only scans the filesystem: linking fontconfig would add a C dependency for a
@@ -32,3 +33,6 @@ ui-richtext = { path = "../../ui/crates/ui-richtext" }
 ui-style = { path = "../../ui/crates/ui-style" }
 ui-widgets = { path = "../../ui/crates/ui-widgets" }
 ui-widgets-md3 = { path = "../../ui/crates/ui-widgets-md3" }
+
+[build-dependencies]
+embed-resource = "3"

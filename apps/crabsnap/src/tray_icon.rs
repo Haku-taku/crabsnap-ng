@@ -19,22 +19,31 @@ const INSET: f32 = 5.5;
 const INK: Color = Color::from_rgba8(0xE5, 0x48, 0x4D, 255);
 
 pub(crate) fn tray_icon() -> Result<Icon, String> {
-    let side = SIZE as f32 - INSET * 2.0;
-    let mut list = DrawList::new(Rect::new(0.0, 0.0, SIZE as f32, SIZE as f32));
+    icon_at(SIZE)
+}
+
+/// 同一幅选框，边长 `size` 点：通知区只要 32 点，可执行文件的图标要从 16 到 256 的一串。
+///
+/// 图元都按 32 点画布定，其余尺寸按比例放大，边线在最小的一档也留得住一个像素。
+pub(crate) fn icon_at(size: u32) -> Result<Icon, String> {
+    let scale = size as f32 / SIZE as f32;
+    let (inset, frame, radius) = (INSET * scale, FRAME * scale, RADIUS * scale);
+    let side = size as f32 - inset * 2.0;
+    let mut list = DrawList::new(Rect::new(0.0, 0.0, size as f32, size as f32));
     list.push_rect(
         DrawList::canvas_owner(),
         RectPrim {
-            rect: Rect::new(INSET, INSET, side, side),
-            radius: Corners::all(RADIUS),
+            rect: Rect::new(inset, inset, side, side),
+            radius: Corners::all(radius),
             fill: Color::TRANSPARENT,
             gradient: None,
-            border: Some((INK, FRAME)),
+            border: Some((INK, frame)),
             border_gradient: None,
             notch: None,
         },
     );
-    let mut pixels = Pixels::new(SIZE, SIZE);
+    let mut pixels = Pixels::new(size, size);
     let mut renderer = CpuRenderer::new();
     renderer.render(&list, &mut pixels, &ui_core::damage::Damage::Full);
-    Icon::from_rgba(ui_paint::encode_rgba_straight(&pixels), SIZE, SIZE)
+    Icon::from_rgba(ui_paint::encode_rgba_straight(&pixels), size, size)
 }

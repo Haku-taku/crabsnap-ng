@@ -588,6 +588,32 @@ node, a menu and an editor. Sources arrive as paths or as a file list from a
 selection, one pin per item, classified by their bytes rather than their names.
 The contract and its phases are in [Pins](./pins.md).
 
+**D11 — The executable is what a desktop launch is.** Everything a Windows session knows about a
+program before it draws anything comes from the exe and its manifest, so `apps/crabsnap/build.rs`
+writes a resource script from `assets/crabsnap.ico` and `assets/crabsnap.manifest` and has
+`embed-resource` run the SDK's `rc.exe` on it: the icon, the `VERSIONINFO` block and the DPI
+declaration travel inside the binary. The manifest declares `PerMonitorV2` (with `true/pm` for
+older readers), `longPathAware` because a shot or a pin may live past `MAX_PATH`, the UTF-8 active
+code page, and the Windows 10/11 `supportedOS` GUID that stops the shell applying a compatibility
+shim. The process then names itself `Maritedo.crabsnap` before anything else, the same string as
+the manifest's assembly identity: a taskbar groups windows by that id, and a shortcut without it
+would be a second application from the daemon it started. The engine's own
+`SetProcessDpiAwarenessContext` calls stay, because the gallery example shares the backend and
+ships no manifest.
+
+Verified against the release exe built here: `mt.exe -inputresource:crabsnap.exe;#1` returns the
+manifest, `VersionInfo` reports `FileDescription`, `CompanyName` and `FileVersion 0.1.0`,
+`GetProcessDpiAwareness` answered `2` for the running process, and `crabsnap info status` printed
+`identity: Maritedo.crabsnap`. The icon was extracted from the exe and looked at. A login start is
+the platform's entry, not a service of ours ([Command Line](./cli.md)).
+
+There is no installer and no signature: the binary runs from wherever it is unpacked, PNG works
+with nothing beside it, and the other encodings need the ffmpeg DLLs in that same directory. An
+unsigned download shows SmartScreen's warning once per machine; signing changes that and needs a
+code-signing certificate, which is a release decision rather than a code one. The icon is
+generated, not drawn by hand — `cargo run -p crabsnap --example icon` writes
+`assets/crabsnap.ico` from the tray's own `icon_at`, one PNG entry per size from 16 to 256.
+
 ## Surface lifecycle
 
 ```text
@@ -973,6 +999,18 @@ the picture rather than by the display's stated peak, which is a capability and
 not the content's range. Saving a capture with no pin measures it once, on the
 worker; a pin's peak is measured when it appears, so no frame waits for either.
 Caught by `a_measured_picture_rolls_its_highlights_into_the_file_white`.
+
+**The Windows binary was a bare executable.** A `cargo build` produced an exe with no resource
+section: Explorer drew the generic application icon, the file's properties showed no version and
+no company, and the only statement that the process could handle a monitor change was a
+`SetProcessDpiAwarenessContext` the engine made when a backend was created — anything that
+happened first ran DPI-unaware, in the system's stretched coordinates. The exe now carries its
+icon, its `VERSIONINFO` and a manifest declaring PerMonitorV2, and the process sets its
+AppUserModelID as its first act, so a taskbar has one application to group the daemon and a
+pinned shortcut under. The manifest's declarations are checked by extracting it with `mt.exe`, by
+`GetProcessDpiAwareness` answering `2`, and by `info status` printing the identity back; the icon
+is checked by extracting it from the exe. What would catch a regression is the build failing on
+`rc.exe` (`embed-resource` reports the resource compiler's own error) rather than a test.
 
 ## See also
 

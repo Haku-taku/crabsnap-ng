@@ -18,6 +18,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 libc = "0.2"
 rustix = { version = "1", features = ["event", "net"] }
 ui-core = { path = "../../../ui/crates/ui-core" }
+ui-platform = { path = "../../../ui/crates/ui-platform" }
 ui-platform-wayland = { path = "../../../ui/crates/ui-platform-wayland" }
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }

@@ -7,7 +7,7 @@
 //! crabsnap shot [output|region] [-f PATH] [--pin] [--delay SECS]
 //! crabsnap pin  [add|list|export|close|show|hide|toggle]
 //! crabsnap info [config|formats|status]
-//! crabsnap daemon [--idle SECS] | settings | quit | reload
+//! crabsnap daemon [--idle SECS] | settings | autostart [on|off] | quit | reload
 //! crabsnap completions --shell <SHELL>
 //! ```
 
@@ -45,9 +45,18 @@ pub enum Sub {
     Info(InfoArgs),
     Daemon(DaemonArgs),
     Settings(SettingsArgs),
+    Autostart(AutostartArgs),
     Quit,
     Reload,
     Completions(CompletionsArgs),
+}
+
+/// 登录时是否启动 daemon：不给状态就只报当前状态。
+#[derive(Args, Debug)]
+pub struct AutostartArgs {
+    // on 或 off；省略时只读不改。
+    #[arg(value_name = "STATE")]
+    pub state: Option<String>,
 }
 
 /// 设置窗口，以及不开窗时的脚本路径。

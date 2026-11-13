@@ -123,6 +123,8 @@ cli-settings-ffmpeg = Write this ffmpeg program path into the configuration
 cli-settings-ui_language = Write this interface language into the configuration; auto follows the system
 cli-settings-shortcut = Write one shortcut as NAME=CHORD; repeat for more, an empty chord clears it
 cli-settings-save = Write the values into the configuration and ask the daemon to reload, without a window
+cli-autostart = Start the daemon when you sign in
+cli-autostart-state = on or off; leave it out to print the state without changing it
 
 # The settings window
 settings-title = CrabSnap settings

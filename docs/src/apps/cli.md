@@ -114,9 +114,10 @@ recipes survive.
 | `pin close|show|hide|toggle [--id N]` | Operate the on-screen pins; the daemon cannot see a client's pointer, so `--id` is required |
 | `pin list` | The pins the daemon holds: id, kind, size, position, source, visibility |
 | `pin export --id N --file PATH [--format F]` | Write an on-screen pin to a file; the pixels live in the daemon |
-| `info config|formats|status` | Read-only answers; `config` prints the file path, effective values and any ignored keys, `formats` the encodings this machine can write and where each comes from, `status` the outputs, the chosen backend and the hotkeys the daemon bound |
+| `info config|formats|status` | Read-only answers; `config` prints the file path, effective values and any ignored keys, `formats` the encodings this machine can write and where each comes from, `status` the outputs, the chosen backend, the hotkeys the daemon bound and the application identity the process took |
 | `daemon [--idle SECS]` | Host the service |
 | `settings [--save] [--backend RUNG] [--format F] [--directory PATH] [--ffmpeg PATH] [--ui-language TAG] [--shortcut NAME=CHORD]...` | The settings window; `--save` applies the flags to the file instead of opening it |
+| `autostart [on\|off]` | Start the daemon at login; no argument prints the state |
 | `quit` | Ask the daemon to exit |
 | `reload` | Re-read the configuration and re-probe affected capabilities |
 | `completions --shell SHELL` | Completion script |
@@ -174,6 +175,14 @@ selected by an environment variable.
 
 `pin list` exists because `pin export` is meaningless without it: the daemon owns the pixels, and
 a client can only name one by the id the daemon gave it.
+
+`autostart` writes the platform's own login entry rather than a mechanism of ours: a `REG_SZ`
+value named `crabsnap` under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` on Windows, and
+`crabsnap.desktop` under `$XDG_CONFIG_HOME/autostart` (else `~/.config/autostart`) on a desktop.
+The command carries this executable's path and `daemon`, and the state it prints is read back
+from that entry, so an executable that has since moved reads as off and `on` rewrites the entry.
+The system's startup settings list the same entry, so a user who prefers their own tool has a
+place to say so.
 
 ## Local mode and the daemon
 
@@ -389,6 +398,7 @@ invocation parses a command.
 | `shot region [--demo] [--script] [--annotate] [--pin-drag] [--pin-zoom] [--pin-menu] [--pin-raise] [-f PATH] [--delay SECS]` | the probes that used to be environment variables |
 | `info config|formats|status` | `status` reports the capture backend and every output: name, logical size, position, scale and refresh |
 | `settings [--save] [...]` | the window, or with `--save` the same values written to the file and announced to the daemon |
+| `autostart [on\|off]` | the platform's login entry: the `Run` value on Windows, a `.desktop` file on the desktop; the report is read back from it |
 | `completions --shell SHELL` | generated from the same tree the parser uses |
 | `daemon [--idle SECS]` | the service: one connection, the local channel, the output list, capability probing once at start, and the tray icon where the platform has one |
 | `quit` / `reload` | answered over the channel; either prints "no daemon is running" when none is |

@@ -13,7 +13,8 @@ use ui_i18n::{Catalog, Language};
 use ui_platform::host::Backend as _;
 
 use crate::cli::{
-    CompletionsArgs, InfoArgs, InfoSub, Invocation, OutputArgs, PinSub, ShotArgs, ShotSub, Sub,
+    AutostartArgs, CompletionsArgs, InfoArgs, InfoSub, Invocation, OutputArgs, PinSub, ShotArgs,
+    ShotSub, Sub,
 };
 
 pub fn run(language: &Arc<Language>, invocation: Invocation) -> Result<(), String> {
@@ -25,6 +26,7 @@ pub fn run(language: &Arc<Language>, invocation: Invocation) -> Result<(), Strin
         Sub::Completions(args) => run_completions(&language.catalog(), args),
         Sub::Daemon(args) => crate::daemon::run(args.idle, Arc::clone(language)),
         Sub::Settings(args) => crate::settings_window::run(&args, language),
+        Sub::Autostart(args) => run_autostart(&args),
         Sub::Quit if no_daemon => Err("no daemon is running".into()),
         Sub::Quit => ask(Request::Quit, "asked the daemon to quit"),
         Sub::Reload if no_daemon => Err("no daemon is running".into()),
@@ -465,28 +467,62 @@ fn run_info(info: InfoArgs, no_daemon: bool) -> Result<(), String> {
             }
             Ok(())
         }
-        InfoSub::Status if no_daemon => crate::status(),
-        InfoSub::Status => match request(Request::Status)? {
-            Some(Response::Status(status)) => {
-                println!("daemon: running");
-                println!("capture: {}", status.capture);
-                if status.outputs.is_empty() {
-                    println!("outputs: none reported");
+        InfoSub::Status if no_daemon => {
+            print_identity();
+            crate::status()
+        }
+        InfoSub::Status => {
+            print_identity();
+            match request(Request::Status)? {
+                Some(Response::Status(status)) => {
+                    println!("daemon: running");
+                    println!("capture: {}", status.capture);
+                    if status.outputs.is_empty() {
+                        println!("outputs: none reported");
+                    }
+                    for output in status.outputs {
+                        println!("output: {output}");
+                    }
+                    println!("pins: {}", status.pins);
+                    for line in &status.hotkeys {
+                        println!("hotkey: {line}");
+                    }
+                    Ok(())
                 }
-                for output in status.outputs {
-                    println!("output: {output}");
-                }
-                println!("pins: {}", status.pins);
-                for line in &status.hotkeys {
-                    println!("hotkey: {line}");
-                }
-                Ok(())
+                Some(Response::Error(error)) => Err(error),
+                Some(other) => Err(format!("unexpected answer: {other:?}")),
+                // 没有 daemon 时问本进程：能答的只有抓取后端。
+                None => crate::status(),
             }
-            Some(Response::Error(error)) => Err(error),
-            Some(other) => Err(format!("unexpected answer: {other:?}")),
-            // 没有 daemon 时问本进程：能答的只有抓取后端。
-            None => crate::status(),
-        },
+        }
+    }
+}
+
+/// Turn the login start on or off, then report what the platform now holds: the report comes
+/// from reading the entry back, so a refused write cannot print as on.
+fn run_autostart(args: &AutostartArgs) -> Result<(), String> {
+    use crabsnap_platform::autostart;
+    match args.state.as_deref() {
+        None => {}
+        Some("on") => autostart::set_autostart(true)?,
+        Some("off") => autostart::set_autostart(false)?,
+        Some(other) => return Err(format!("unknown state {other:?}: say on or off")),
+    }
+    let state = if autostart::autostart_enabled()? {
+        "on"
+    } else {
+        "off"
+    };
+    println!("autostart: {state}");
+    Ok(())
+}
+
+/// The name the shell groups this process under; `none` is a run the taskbar can only group
+/// by executable path, which is what a shortcut with a different identity would split from.
+fn print_identity() {
+    match crabsnap_platform::app_user_model_id() {
+        Some(id) => println!("identity: {id}"),
+        None => println!("identity: none"),
     }
 }
 

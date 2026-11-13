@@ -27,13 +27,17 @@ pub fn shot_dir(configured: Option<&Path>) -> PathBuf {
     )
 }
 
-/// The configuration file: `XDG_CONFIG_HOME`, else `~/.config`, else temporary.
-pub fn config_path() -> PathBuf {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
+/// The user's configuration tree: `XDG_CONFIG_HOME`, else `~/.config`, else temporary.
+pub fn config_base() -> PathBuf {
+    std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|home| Path::new(&home).join(".config")))
-        .unwrap_or_else(std::env::temp_dir);
-    crabsnap_core::paths::config_path(&base)
+        .unwrap_or_else(std::env::temp_dir)
+}
+
+/// The configuration file: `config_base()`'s `crabsnap/config.toml`.
+pub fn config_path() -> PathBuf {
+    crabsnap_core::paths::config_path(&config_base())
 }
 
 /// Where a process's log goes: the XDG state directory, which is the convention for data

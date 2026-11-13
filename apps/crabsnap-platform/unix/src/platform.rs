@@ -6,6 +6,7 @@
 
 #![cfg(unix)]
 
+pub mod autostart;
 pub mod capture;
 pub mod channel;
 pub mod colour;
@@ -25,6 +26,16 @@ pub const CAPTURE_BACKENDS: &[&str] = &["auto", "ext", "screencopy", "portal"];
 /// carry the preference, which is the gettext convention the engine reads.
 pub fn system_languages() -> Vec<String> {
     ui_platform::posix_system_languages()
+}
+
+/// Unix names a running application by its desktop entry and window class, both read from the
+/// launch rather than set by the process, so there is no per-process identity to give here.
+pub fn set_app_user_model_id(_id: &str) {}
+
+/// Unix has no per-process identity to report: the desktop names the application by its
+/// entry, and no call of this process's can change that.
+pub fn app_user_model_id() -> Option<String> {
+    None
 }
 
 /// 说一句终端之外也得让人看见的话：桌面启动的进程没有终端，这句话只能进日志。

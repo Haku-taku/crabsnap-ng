@@ -2303,7 +2303,14 @@ fn band(rect: Rect, colour: Color) -> Shape {
     }
 }
 
+/// What the shell knows this application by: the manifest's assembly identity, the process's
+/// AppUserModelID and a shortcut that starts the daemon all say the same string.
+const APP_USER_MODEL_ID: &str = "Maritedo.crabsnap";
+
 fn main() -> Result<(), String> {
+    // Before any window or shell surface exists: after one does, the identity only applies to
+    // what comes next, and the taskbar has already grouped by path.
+    crabsnap_platform::set_app_user_model_id(APP_USER_MODEL_ID);
     // A Windows build is a GUI-subsystem binary, and a shell hands a GUI child no console
     // handles: without attaching to the parent's, every word this process prints is lost.
     // Only the bare launch turns that answer into a decision; a command needs its output

@@ -10,13 +10,18 @@ use windows::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
+use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::Console::{
     ATTACH_PARENT_PROCESS, AttachConsole, GetConsoleCP, GetStdHandle, STD_ERROR_HANDLE, STD_HANDLE,
     STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle,
 };
+use windows::Win32::UI::Shell::{
+    GetCurrentProcessExplicitAppUserModelID, SetCurrentProcessExplicitAppUserModelID,
+};
 use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 use windows::core::PCWSTR;
 
+pub mod autostart;
 pub mod capture;
 pub mod channel;
 pub mod paths;
@@ -37,6 +42,31 @@ pub const CAPTURE_BACKENDS: &[&str] = &["auto", "wgc", "duplication", "gdi"];
 /// before any backend exists, and would otherwise always answer English.
 pub fn system_languages() -> Vec<String> {
     ui_platform_win32::system_languages()
+}
+
+/// The identity the shell groups this process under, and the one a shortcut that starts the
+/// daemon has to carry as well.
+///
+/// Without it the taskbar groups windows by the executable's path, so a pinned shortcut and a
+/// daemon started from it read as two applications and neither brings the other forward.
+pub fn set_app_user_model_id(id: &str) {
+    let id = wide(id);
+    // A refused identity leaves the default grouping; a run that cannot be grouped still runs.
+    let _ = unsafe { SetCurrentProcessExplicitAppUserModelID(PCWSTR::from_raw(id.as_ptr())) };
+}
+
+/// The identity the shell took for this process, read back from it: `info status` answers
+/// whether the taskbar has an application to group under, or only the executable's path.
+pub fn app_user_model_id() -> Option<String> {
+    // No identity is the state before the call, or a refused one; both answer `None`.
+    let raw = unsafe { GetCurrentProcessExplicitAppUserModelID().ok()? };
+    if raw.is_null() {
+        return None;
+    }
+    let id = unsafe { raw.to_string().ok() };
+    // The API hands over a block this process owns.
+    unsafe { CoTaskMemFree(Some(raw.0.cast())) };
+    id
 }
 
 /// 说一句终端之外也得让人看见的话：桌面图标启动的进程没有控制台，只能开一个消息框。

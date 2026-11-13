@@ -123,6 +123,8 @@ cli-settings-ffmpeg = 把 ffmpeg 程序路径写进配置
 cli-settings-ui_language = 把界面语言写进配置；auto 表示跟随系统
 cli-settings-shortcut = 按 NAME=和弦 写一条快捷键，可重复；和弦留空表示清除该操作
 cli-settings-save = 把值写进配置并让 daemon 重新读取，不开窗
+cli-autostart = 登录时启动 daemon
+cli-autostart-state = on 或 off；省略时只报告当前状态，不做改动
 
 # The settings window
 settings-title = CrabSnap 设置
