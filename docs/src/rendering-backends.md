@@ -233,8 +233,9 @@ everywhere else in the layer's rectangle, and an all-edge anchor covered the
 monitor exactly.
 
 Input methods are IMM32. A frame's `ImeState` opens or closes the input context
-and puts the composition window at the caret with the candidate list below it in
-screen coordinates. `WM_IME_COMPOSITION` is read for two strings: the
+and puts the composition window at the caret, with the candidate list told to
+keep off the caret's own rectangle; both forms take window coordinates.
+`WM_IME_COMPOSITION` is read for two strings: the
 composition becomes `Event::Preedit` and the result becomes `Event::Text`. The
 IME's own composition window is suppressed, because the engine draws the preedit,
 and a secret buffer suppresses the candidate list too. `WM_IME_CHAR` is ignored:
@@ -245,10 +246,10 @@ text around the caret to be deleted, so `ImeState`'s surrounding text and
 
 Measured with `cargo run -p ui-platform-win32 --example ime`: an unfocused
 window left the context closed and a caret opened it, a caret 20 by 40 logical
-units placed the composition window at (25, 50) physical on a 1.25-scale monitor
-with the candidate list at its bottom edge in screen coordinates, and an
-injected `a😀b` composition arrived as a preedit of 6 bytes with the caret at
-its end, which is what an injected composition reports.
+units placed the composition point at (25, 50) physical on a 1.25-scale monitor
+with the candidate form excluding the caret's rectangle, and an injected `a😀b`
+composition arrived as a preedit of 6 bytes with the caret at its end, which is
+what an injected composition reports.
 
 Not implemented on this path: non-text clipboard formats and HDR.
 
@@ -612,6 +613,21 @@ Wayland-only. The same probe pins the placement arithmetic (a 320x180 layer with
 a 40,24 margin at (50, 30) on a 1.25-scale monitor) and the input region
 (`WindowFromPoint` returns the layer over its published patch and the window
 below it elsewhere).
+
+**The candidate list was placed in screen coordinates and read as window ones.**
+`ImmSetCandidateWindow`'s `ptCurrentPos` is relative to the client area's
+upper-left corner, for `CFS_CANDIDATEPOS` as much as for the composition form,
+and the first implementation converted the caret with `ClientToScreen`. The list
+therefore appeared one window offset down and right of the caret and followed
+the window anywhere it was dragged. Measured with a throwaway probe that opened
+a window at (400, 300), put the caret at screen (459, 413), typed a real Pinyin
+composition and captured the screen: the list sat at (870, 805), and at a
+different place again on a second run, because it was never anchored to the
+caret at all. Both forms now take window coordinates and the candidate form uses
+`CFS_EXCLUDE` with the caret's rectangle, so the system places the list where the
+caret is not; the same probe then found it at (460, 438), directly below the
+caret. `examples/ime.rs` asserts the exclusion style, the point and the rectangle
+it reads back.
 
 ## Status
 

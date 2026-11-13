@@ -449,13 +449,16 @@ fill `Event::Preedit` and `Event::Text`. The IME's own composition window is
 suppressed in `WM_IME_SETCONTEXT`, because the engine draws the preedit, and a
 secret buffer suppresses the candidate list as well.
 
-Three traps. `WM_IME_CHAR` duplicates characters that also arrive through
+Four traps. `WM_IME_CHAR` duplicates characters that also arrive through
 `GCS_RESULTSTR`; the backend reads the result string and ignores `WM_IME_CHAR`,
 which is also the only path that keeps a surrogate pair whole. The composition
 string is UTF-16 with its cursor in code units, so the preedit's byte cursor is
 a separate conversion, and a position inside a surrogate pair snaps forward.
-And a context change sends messages back to the same window procedure, so no
-state may be borrowed while the IMM calls run.
+Both forms' `ptCurrentPos` is relative to the client area, the candidate form
+included, so a point that went through `ClientToScreen` put the list exactly one
+window offset down and right of the caret. And a context change sends messages
+back to the same window procedure, so no state may be borrowed while the IMM
+calls run.
 
 Surrounding text has no IMM32 equivalent, and neither has
 `Event::DeleteSurrounding`; both stay unserved until TSF. TSF provides them
@@ -465,10 +468,9 @@ surrounding text and for input scopes on the hidden text fields the magnifier
 uses. The engine's four-thousand-byte cap stays on the engine side.
 
 `examples/ime.rs` checks what a machine without a language IME can still show:
-the context opens with a caret and closes without one, the composition window
-follows the caret, the candidate list hangs below it in screen coordinates, and
-an injected composition string arrives as a preedit whose cursor is a byte
-offset.
+the context opens with a caret and closes without one, the composition point
+follows the caret, the candidate form excludes the caret's rectangle, and an
+injected composition string arrives as a preedit whose cursor is a byte offset.
 
 ## Services
 
@@ -705,6 +707,7 @@ ways this design does not yet answer.
 | Per-monitor v2 without handling `WM_DPICHANGED` | Blurry or wrongly sized surface after a drag between monitors | Rebuild the swapchain and add full damage |
 | Mixing logical and physical coordinates for pin placement | Pins drift by a few pixels at 125% and 150% | One conversion at the surface boundary; the canvas and the capture use the same monitor DPI |
 | Handling `WM_IME_CHAR` and `WM_CHAR` | Doubled characters with an IME | Read `GCS_RESULTSTR` and ignore `WM_IME_CHAR`, or the text arrives twice |
+| `ImmSetCandidateWindow` with a screen-space point | The candidate list sits one window offset down and right of the caret, and follows the window | Both IMM forms take client-area coordinates, and `CFS_EXCLUDE` places the list off the caret |
 | `RegisterHotKey` on a thread without a message loop | The hotkey never fires | Register on the loop thread and pump |
 | Duplicating an output from the wrong adapter | Black frames on hybrid laptops | Duplicate from the output's own adapter |
 | Not excluding own windows from capture | The overlay appears in the screenshot | `WDA_EXCLUDEFROMCAPTURE` on every own HWND, and capture before opening |
