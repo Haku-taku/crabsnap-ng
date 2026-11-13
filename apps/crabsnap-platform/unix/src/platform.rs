@@ -19,6 +19,14 @@ pub use channel::{Client, ClientError, address};
 /// desktop over D-Bus.
 pub const CAPTURE_BACKENDS: &[&str] = &["auto", "ext", "screencopy", "portal"];
 
+/// The user's preferred UI languages, most preferred first, as BCP-47 tags.
+///
+/// POSIX has no locale query; the session's `LANGUAGE`, `LC_ALL`, `LC_MESSAGES` and `LANG`
+/// carry the preference, which is the gettext convention the engine reads.
+pub fn system_languages() -> Vec<String> {
+    ui_platform::posix_system_languages()
+}
+
 /// 说一句终端之外也得让人看见的话：桌面启动的进程没有终端，这句话只能进日志。
 pub fn alert(message: &str) {
     eprintln!("{message}");

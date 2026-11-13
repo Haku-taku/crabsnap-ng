@@ -2355,7 +2355,7 @@ pub(crate) fn language_choice(
 
 /// The app's language: one catalog for the app and the workspace's widgets.
 pub(crate) fn load_language(choice: LanguageChoice) -> Result<Arc<Language>, String> {
-    let system = ui_platform::posix_system_languages();
+    let system = crabsnap_platform::system_languages();
     // A pin's Markdown card asks for the same `Msg` the gallery does, so the app's own
     // messages are merged into the widget catalog's locale rather than kept apart.
     let mut sources: Vec<(String, String)> = ui_i18n::LOCALES

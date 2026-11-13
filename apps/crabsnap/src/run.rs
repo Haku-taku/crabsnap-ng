@@ -404,7 +404,7 @@ fn run_info(info: InfoArgs, no_daemon: bool) -> Result<(), String> {
                 Ok(language) => println!("ui.language resolved: {}", language.resolved()),
                 Err(error) => println!("ui.language: {error}"),
             }
-            let system = ui_platform::posix_system_languages();
+            let system = crabsnap_platform::system_languages();
             if system.is_empty() {
                 println!("system languages: none");
             } else {

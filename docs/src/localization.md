@@ -41,8 +41,11 @@ stores only the choice.
 
 ### The system's languages
 
-`ui_platform::posix_system_languages()` returns the tags the environment
-prefers, most preferred first:
+The application asks its own platform crate, `crabsnap_platform::system_languages()`, because
+the command line builds its help text before any backend exists. Windows answers from
+`GetUserPreferredUILanguages` under `MUI_LANGUAGE_NAME` — the list a person sets in Settings,
+where no locale variable is involved — and a POSIX session answers from its environment, most
+preferred first:
 
 - the message category is `LC_ALL`, else `LC_MESSAGES`, else `LANG`; when it is
   `C` or `POSIX`, the answer is empty, because the user asked for no
@@ -52,10 +55,11 @@ prefers, most preferred first:
 - each value loses its `.codeset` and `@modifier` suffixes, `_` becomes `-`, and
   repeats are dropped.
 
-`Backend::system_languages()` is the same answer through the platform seam; its
-default calls the function above. A backend whose operating system reports the
-preference through an API overrides it. The function exists because the command
-line builds its help text before any backend exists.
+`ui_platform::posix_system_languages()` is that environment convention, and
+`Backend::system_languages()` answers the same list to a running loop: its default calls the
+function, and a backend whose operating system reports the preference through an API overrides
+it. The Win32 backend reads `ui_platform_win32::system_languages`, which is what the app's
+platform crate calls too, so a window, the daemon and the help text agree.
 
 ### The choice
 
@@ -146,7 +150,10 @@ into `ui_i18n::LANGUAGE_NAMES`; a locale without one fails the build.
 | File | Responsibility |
 | --- | --- |
 | `ui/crates/ui-platform/src/locale.rs` | The POSIX list and its precedence |
+| `ui/crates/ui-platform-win32/src/locale.rs` | Windows' list, from `GetUserPreferredUILanguages` |
 | `ui/crates/ui-platform/src/host.rs` | `Backend::system_languages` |
+| `apps/crabsnap-platform/win32/src/platform.rs` | `system_languages` for the command line |
+| `apps/crabsnap-platform/unix/src/platform.rs` | The same, from the environment |
 | `ui/crates/ui-i18n/src/language.rs` | `LanguageChoice`, `Language`, negotiation |
 | `ui/crates/ui-i18n/src/catalog.rs` | Preference lists, `Matching`, `Catalog::locale` |
 | `ui/crates/ui-i18n/build.rs` | `LANGUAGE_NAMES` from each locale's `language-name` |
@@ -166,6 +173,19 @@ into `ui_i18n::LANGUAGE_NAMES`; a locale without one fails the build.
 | `the_language_setting_reads_auto_a_tag_and_the_old_key` | A config value reaching the wrong branch |
 
 ## Corrections
+
+**`auto` resolved to English on Windows.** The app read the list with
+`ui_platform::posix_system_languages()`, the environment convention, directly. A Windows session
+states no `LANG`, `LC_*` or `LANGUAGE`, so the list was empty and the command line's help, the
+daemon, the settings window and the tray all came up English on a Chinese system — while the
+backend's `system_languages` had asked Windows all along. `crabsnap info config` showed the
+disagreement: `system languages: none` beside `ui.language resolved: en`, where
+`GetUserPreferredUILanguages` reports `zh-CN, en-US`. The app now asks
+`crabsnap_platform::system_languages()`, which is that same Win32 call and the environment on a
+POSIX session, and the backend reads the one Win32 function; `info config` reads `system
+languages: zh-CN, en-US` and `resolved: zh-CN`, and the settings window and tray menu render
+Chinese. No test pins it, because the answer is a machine setting: the check that catches a
+regression is `info config` on a system whose language is not English.
 
 The first version of the settings window carried the language as free text and
 validated it on Save; it could not express "follow the system", and

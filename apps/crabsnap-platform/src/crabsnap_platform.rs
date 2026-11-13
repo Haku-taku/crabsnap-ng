@@ -12,11 +12,13 @@ pub use crabsnap_platform_ffmpeg as shim;
 #[cfg(unix)]
 pub use crabsnap_platform_unix::{
     CAPTURE_BACKENDS, Client, ClientError, address, alert, attach_terminal, capture, paths,
+    system_languages,
 };
 
 #[cfg(windows)]
 pub use crabsnap_platform_win32::{
     CAPTURE_BACKENDS, Client, ClientError, address, alert, attach_terminal, capture, paths,
+    system_languages,
 };
 
 #[cfg(not(any(unix, windows)))]

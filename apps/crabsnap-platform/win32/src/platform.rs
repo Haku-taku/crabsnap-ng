@@ -30,6 +30,15 @@ pub use channel::{Client, ClientError, address};
 /// always answers but is 8-bit.
 pub const CAPTURE_BACKENDS: &[&str] = &["auto", "wgc", "duplication", "gdi"];
 
+/// The user's preferred UI languages, most preferred first, as BCP-47 tags.
+///
+/// Windows keeps the list in its own settings rather than in the locale variables a POSIX
+/// session carries, so this asks the system API: the command line builds its help text
+/// before any backend exists, and would otherwise always answer English.
+pub fn system_languages() -> Vec<String> {
+    ui_platform_win32::system_languages()
+}
+
 /// 说一句终端之外也得让人看见的话：桌面图标启动的进程没有控制台，只能开一个消息框。
 pub fn alert(message: &str) {
     let text = wide(message);
