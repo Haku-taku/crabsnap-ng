@@ -195,7 +195,7 @@ space.
 | --- | --- |
 | `SurfaceColour::Sdr` | `DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709`, BGRA8 unorm |
 | `SurfaceColour::Hdr` | `DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020`, RGBA16F, values encoded by the existing `encode_for_pq_output` |
-| `ContentColour` from a capture | PQ and BT.2020 from Desktop Duplication; linear f16 in scRGB units from Windows Graphics Capture `[to verify]` |
+| `ContentColour` from a capture | `IDXGIOutput5::DuplicateOutput1` hands back whichever of its format list the desktop is composed in: `R16G16B16A16_FLOAT` scRGB (linear, 1.0 is 80 nits) on an advanced colour desktop, BGRA8 otherwise. `DuplicateOutput` alone always converts to BGRA8, by clipping |
 | scRGB composition | `DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709`, where 1.0 is 80 nits |
 
 Presenting f16 PQ keeps the engine's single output transform: the shader that
@@ -659,7 +659,20 @@ NT handle and a keyed mutex is the fallback, and it costs a copy.
 HDR capture yields `R16G16B16A16_FLOAT` from Duplication and f16 from Graphics
 Capture. Both arrive in a linear scRGB-like space; the conversion to
 `ContentColour` and to the PNG rendition is the same code the Wayland path
-uses, with the buffer format changed. Windows draws a highlight border around a
+uses, with the buffer format changed.
+
+The duplication rung is implemented in `ui-platform-win32`: `ScreenCapture` duplicates
+one output from a device on that output's adapter and returns straight RGBA8,
+rotated upright, with the output's name and DPI scale. It asks
+`DuplicateOutput1` for f16 first, and the same clipping trap applies on an auto
+colour managed SDR desktop as on an HDR one: `DuplicateOutput` alone converts
+the composed surface to BGRA8 and everything above roughly 158 in sRGB lands on
+white. Measured here — an SDR-composed ACM panel whose white level reads raw
+3000 (240 nits) — a chart of eight known codes read back exactly through the
+float path and came back as 59 for 32 and 210 for 128 through the 8-bit one.
+The float frame is divided by the white level and encoded to sRGB, so a
+screenshot holds the codes a window drew; light past SDR white clips until the
+engine carries a half-float content colour. Windows draws a highlight border around a
 captured item on screen; it is an overlay, not part of the captured buffer, and
 it is switched off through `GraphicsCaptureSession::IsBorderRequired` on
 Windows 11 22H2 where the app is allowed to change it `[to verify]`.
@@ -833,7 +846,7 @@ flaky test.
 | Transparent surfaces and input regions | Done for a layer: `HTTRANSPARENT` is verified with `WindowFromPoint` landing on the window below. A translucent capture window is still planned |
 | Clipboard, drag-and-drop, hotkeys | A copy carries text, HTML, a file list and a picture, each as every Windows format it needs; a paste is text only; hotkeys done through `RegisterHotKey` against a message-only window; drag-and-drop and delayed rendering planned |
 | Named-pipe IPC | Server done: message mode verified by `host_services`, where a client connects, sends one message and reads the answer; a worker's deferred reply is implemented but unexercised |
-| Capture via WGC and Desktop Duplication | Planned; the HDR path and the border behaviour are unverified |
+| Capture via WGC and Desktop Duplication | Desktop Duplication done: one named or primary output, from a device on its adapter, f16 composed surface converted to SDR sRGB, rotation and DPI scale carried on the frame; verified against a chart of known codes on an auto colour managed desktop. HDR highlights clip, several outputs are not assembled, and WGC, the border behaviour and `WDA_EXCLUDEFROMCAPTURE` are planned |
 | IME | Composition done through IMM32: open status from the frame's `ImeState`, composition and candidate windows at the caret, preedit and commit as engine events; surrounding text and `DeleteSurrounding` need TSF |
 | Packaging and signing | Planned |
 | Vulkan | Not planned; see [Is Vulkan the right renderer?](#vulkan) |

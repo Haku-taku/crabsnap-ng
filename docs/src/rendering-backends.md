@@ -276,8 +276,8 @@ other output keeps the 8-bit sRGB chain.
 SDR white is what linear 1.0 is shown at, and DXGI does not report it:
 `DXGI_OUTPUT_DESC1` has no field for the value, which belongs to the display
 configuration under `DISPLAYCONFIG_SDR_WHITE_LEVEL` and is found by matching that
-path's source GDI device name to the monitor's (thousandths of 80 nits: 1000 on
-this machine). The panel's own minimum and peak bound the destination's tone
+path's source GDI device name to the monitor's (thousandths of 80 nits: 3000, or
+240 nits, on this machine). The panel's own minimum and peak bound the destination's tone
 curve, and sRGB content reaches BT.2020 through the renderer's gamut matrix.
 
 An output that will not present PQ takes the SDR chain instead. The chain asks
@@ -290,9 +290,9 @@ it was built with until it is reopened.
 Measured with `cargo run -p ui-platform-win32 --example hdr --release`. This
 machine's panel composes SDR — its output reports colour space 0 — so the probe
 pins the fallback: the chain is 8-bit and all five grey codes read back
-unchanged. Aiming the renderer at the output's own description (80 nits of SDR
-white from the display configuration, 417.7 nits peak) moved white to 0.486
-against `encode_for_pq_output`'s 0.4859 and every other code to within 0.0007,
+unchanged. Aiming the renderer at a destination of 80 nits of SDR white and the
+panel's 417.7-nit peak moved white to 0.486 against `encode_for_pq_output`'s
+0.4859 and every other code to within 0.0007,
 with the chain still 8-bit because PQ present is refused there. The HDR chain
 itself is `[unverified]`: this panel never composes in PQ, so what a real HDR
 output does with it is unmeasured. `window_scene`'s `WINDOW_CHECK` expectations
@@ -313,6 +313,39 @@ follow whichever branch the presenter took.
   `read_pixels` on the surface returns the bytes the compositor got.
 - A size change adds full damage. Without it, bands outside the reported
   region keep old pixels.
+
+### Screen capture
+
+`ScreenCapture` duplicates one output and hands back a `ScreenFrame`: straight
+RGBA8, top-down, already rotated upright, with the output's GDI device name and
+its DPI scale. The duplication returns the desktop's own texture, so the D3D11
+device has to sit on the adapter that drives that output; on a hybrid laptop a
+device on the other adapter duplicates a black frame.
+
+The duplication asks for `R16G16B16A16_FLOAT` first and `B8G8R8A8_UNORM` second
+through `IDXGIOutput5::DuplicateOutput1`. DWM composes an advanced colour
+desktop — HDR, or auto colour managed SDR — in linear light, sRGB primaries,
+where 1.0 is 80 nits and SDR white sits at the display's own white level;
+`IDXGIOutput1::DuplicateOutput` converts that surface to BGRA8 by clipping,
+which is where an over-exposed screenshot comes from. The float frame instead
+divides by the display's white from `DISPLAYCONFIG_SDR_WHITE_LEVEL` and encodes
+sRGB, which returns the codes a window drew. Light past SDR white clips: the
+frame is an SDR picture, and a genuinely HDR scene loses its highlights until
+the engine can carry half-floats through to a sink.
+
+Measured with `cargo run -p ui-platform-win32 --example capture --release`: a
+chart of eight known codes (black, two greys, white, the three primaries, one
+mixed colour) drawn into a window and read back out of the duplicated desktop
+matched exactly, which pins channel order, position and colour path at once.
+The same chart through `DuplicateOutput` read 32 as 59 and 128 as 210 — linear
+light times the display's 240-nit white, clipped — and white and every primary
+at 255, which is what asking for floats removes.
+
+Two frames are not the desktop: one whose `LastPresentTime` is zero carries the
+pointer and nothing else, and the first frame after `DuplicateOutput` is empty
+in the desktop's own packing. `grab` skips both until its deadline. The packing
+comes from each frame's own texture, not from `GetDesc` at duplication time,
+which describes the mode rather than what `AcquireNextFrame` hands over.
 
 ## CPU path
 
@@ -424,6 +457,10 @@ shadow scenes each found defects on their first comparison run.
 | Let a `WM_PAINT` reach `DefWindowProcW` unpainted | It is reposted until the thread starves; validate it and let the frame loop paint |
 | Declare PQ on a chain without asking the output | An SDR-composed output refuses `SetColorSpace1`; nothing is presented into a chain that cannot show |
 | Look for SDR white in `DXGI_OUTPUT_DESC1` | The struct has no such field; the value is in the display configuration, on the path whose source names the monitor |
+| Capture through `IDXGIOutput1::DuplicateOutput` on an advanced colour desktop | It converts the composed float surface to BGRA8 by clipping: SDR windows arrive over-exposed (32 reads 59, 128 reads 210) |
+| Trust the format `GetDesc` reports when the duplication opens | It describes the mode, not the texture `AcquireNextFrame` hands over |
+| Take the first frame after `DuplicateOutput` as the desktop | It is empty; a pointer-only frame has `LastPresentTime` zero and no image |
+| Duplicate on a device from another adapter | A hybrid laptop gets a black frame |
 
 ## Corrections
 
@@ -682,12 +719,26 @@ research note listed `DXGI_OUTPUT_DESC1::SDRWhiteLevel`; the struct has
 no other query for one. The value lives in the display configuration:
 `DISPLAYCONFIG_SDR_WHITE_LEVEL` on the path whose
 `DISPLAYCONFIG_SOURCE_DEVICE_NAME` equals the monitor's `szDevice`, in
-thousandths of 80 nits (1000, or 80 nits, on this machine). With it, linear 1.0
+thousandths of 80 nits. With it, linear 1.0
 in the scene is the desktop's own SDR white rather than a guess. The same pass
 found the other half: an output whose desktop is not composing in HDR refuses the
 PQ colour space, so the chain asks `CheckColorSpaceSupport` first and keeps the
 8-bit chain when the answer is no — forced through anyway, the D3D11 encode
 still matched `encode_for_pq_output` to 0.0007 in an SDR buffer.
+
+**Capture took the desktop's 8-bit surface at face value.** `IDXGIOutput1::DuplicateOutput`
+always hands back BGRA8, and on an auto colour managed desktop that is the composed float
+surface clipped: the first probe compared one drawn colour with the captured one and read
+[255, 56, 150] where [220, 30, 90] had been drawn. A chart of eight known codes pinned the
+rule — 32 read as 59, 128 as 210, white and every primary at 255 — which is linear light
+multiplied by the display's SDR white and clipped, so nothing above roughly 158 in sRGB
+survived. The duplication now asks `IDXGIOutput5::DuplicateOutput1` for
+`R16G16B16A16_FLOAT` first, divides the frame by the white level from
+`DISPLAYCONFIG_SDR_WHITE_LEVEL` (raw 3000 here, 240 nits — the earlier claim of 1000 in this
+document had no measurement behind it) and encodes sRGB; the same chart then read back
+exactly, and `examples/capture.rs` checks all eight codes. The same pass found that the frame
+right after `DuplicateOutput` is empty and arrives in the mode's packing, and that a
+pointer-only frame carries a zero `LastPresentTime`; neither is the desktop.
 
 ## Status
 
@@ -707,11 +758,15 @@ serves a named-pipe channel and global hotkeys. A layer surface opens as a
 topmost, non-activating popup on the primary monitor, placed by the spec's
 anchors, size and margins, and click-through outside the areas its frame
 publishes. An input method composes through IMM32, with the engine's preedit and
-commit events and the IME windows at the caret.
+commit events and the IME windows at the caret. A screen capture duplicates an
+output through Desktop Duplication, asking for the surface an advanced colour
+desktop composes in and returning SDR sRGB codes.
 
 Not implemented: on the Windows process loop, a selection reader; on the
 Windows window, a paste that carries more than text, the input method's
-surrounding text (which needs TSF), and redraw during a modal resize drag;
+surrounding text (which needs TSF), and redraw during a modal resize drag; in a
+capture, HDR content (a float frame is converted to SDR, so light past SDR white
+clips, and a frame larger than one output is not assembled);
 Vulkan. The Windows and Vulkan notes in `old/` are surveys, not code.
 
 ## See also
