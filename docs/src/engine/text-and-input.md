@@ -246,6 +246,12 @@ fails on the focus assertion when the applied request is removed.
   query.
 - Named, generic, and fallback faces come from `fontique`; without the
   `system` feature there is no OS font stack at all.
+- The base stack is the families an app passed to `with_stack`, then the
+  platform's UI face (`GenericFamily::SystemUi`), then the plain sans — so the
+  default style, which names `SystemUi`, renders in the desktop's own face.
+- `SystemUi` is fontique's own UI slot, not its sans: Segoe UI on Windows
+  (`backend/dwrite.rs:37`), the system font on macOS (`backend/coretext.rs:32`),
+  the configured default on a fontconfig desktop (`backend/fontconfig.rs:841`).
 
 ## Shaping and line breaking
 

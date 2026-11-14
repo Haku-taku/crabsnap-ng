@@ -204,6 +204,17 @@ the red run read `shaped 28.76, outlines 32.72`). `advance` is shaped for the sa
 0.6 em per character had made every face and weight measure alike
 (`an_advance_is_the_shaped_width_of_the_face_it_names`, red at `432 against 389.3`).
 
+**Every app rendered in Arial on Windows.** This page said the engine names no font and a fresh
+pass draws in whatever the platform calls its UI face, and the provider did not do that:
+`GenericFamily::SystemUi` — the family `TextStyle::new` names for every run that names none — was
+folded into fontique's sans slot, and the base stack behind the default style was resolved from
+the plain sans besides. Measured through the provider on this machine, `SystemUi`, `SansSerif`
+and the base stack's first face all named `Arial`. `SystemUi` now reaches fontique's own UI slot
+and the base stack takes that face ahead of the plain sans; the same measurement then reported
+`Segoe UI` for the UI slot and for the stack, `Arial` only for the sans. Pinned by
+`the_default_style_shapes_in_the_platforms_ui_face`, watched red with the base stack back on the
+plain sans — face 14 where the UI slot's face 0 belonged.
+
 ## Status
 
 Implemented: one fontique-backed provider for family enumeration, exact and
