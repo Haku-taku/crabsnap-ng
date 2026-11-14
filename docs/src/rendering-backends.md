@@ -129,7 +129,11 @@ chain and `Present`. Each chain carries a frame-latency event
 (`DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT` with
 `SetMaximumFrameLatency(1)`); the thread waits on all of them in one
 `WaitForMultipleObjects` and presents whichever chain says it can take a frame,
-with no swap interval, so no window's blank is paid by another window. When it
+with no swap interval, so no window's blank is paid by another window. A chain
+whose event is set is still only presented once the previous frame has held the
+display for its output's period, which the same wait carries as a high-resolution
+waitable timer: no surface outruns the display it is on, and no surface waits on
+another's deadline. When it
 finishes a frame — presented, refused, or given up on after a rebuild — it sets
 that surface's frame event, and the loop waits on that event beside the thread's
 messages with `MsgWaitForMultipleObjectsEx`. That wait is the pacing point a
@@ -1374,9 +1378,20 @@ pressed window first, and the process neither crashed nor hung. A hand drag rema
 What the composition chain gives up is DWM-side pacing: with `Present(0)` and the waitable,
 the chain's event was set again within microseconds of each `Present` here, so the thread ran
 at thousands of frames per second per window instead of the output's 275 Hz. That is the
-same overdraw the earlier `Present(0)` build had, not a regression from this change; a
-frame-rate pass should throttle each surface against its output's refresh rather than
-reintroduce a blocking present.
+same overdraw the earlier `Present(0)` build had, not a regression from this change.
+
+The surface now paces itself. Each entry carries its output's refresh period — read from
+`Win32Window::refresh_hz`, re-read when the window moves to another monitor or the display
+changes — and a frame is presented only once the previous one has held the display for that
+period. The earliest deadline is armed on a `CREATE_WAITABLE_TIMER_HIGH_RESOLUTION`
+waitable timer that sits in the same `WaitForMultipleObjects` as every chain's event, so a
+deadline is a deadline and no window's blank is paid by another. The wait's own millisecond
+timeout cannot do this: its granularity is the system's 15.6 ms clock tick, which paced the
+275 Hz example at 64 frames a second per window. With the timer the same example presented
+about 500 frames a second over two windows, and a move onto another output changes the
+period with it. Two surfaces on one thread still cost each other the time the other spends
+drawing, so the pair lands a little under twice the rate; that is the single GPU thread's
+own cost, and the rate stays one the display can show.
 
 ## Status
 
