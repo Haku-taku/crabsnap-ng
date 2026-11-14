@@ -556,6 +556,14 @@ Checked by captures of one running window: with `AppsUseLightTheme` at 1 the for
 were light; setting it to 0 and broadcasting `WM_SETTINGCHANGE` made the same window dark without
 a restart. The value was restored afterwards.
 
+**The settings window could be dragged narrower than a row could lay out.** Its surface declared
+an opening size but no floor, so a border drag could take the client area below the width a row
+needs: the field is 592 logical pixels inside 24 of padding, and a narrower window had no width
+to break a line into, so the rows overflowed the form. The window now asks for
+`.with_min_size((640, 320))` — the field plus both paddings, and enough height for the heading
+and one group. Checked by `resize_probe` in the Win32 backend, which declares a minimum and sees
+both the shell's `WM_GETMINMAXINFO` answer and an inward border drag stop at it.
+
 ## See also
 
 - [The Screenshot App](./screenshot-app.md): what the commands do to the screen.

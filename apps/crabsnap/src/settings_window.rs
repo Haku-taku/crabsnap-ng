@@ -96,7 +96,10 @@ pub(crate) fn run(args: &crate::cli::SettingsArgs, language: &Arc<Language>) -> 
         close: false,
     };
     host.open(
-        SurfaceSpec::window("dev.crabsnap.settings", title, (640, 740)),
+        // A field is 592 wide inside 24 of padding: a narrower window has no width to
+        // break a row into, so a user may not drag it there.
+        SurfaceSpec::window("dev.crabsnap.settings", title, (640, 740))
+            .with_min_size((640, 320)),
         window,
         OpenOptions {
             fonts: vec![crate::fonts::icon_face()],

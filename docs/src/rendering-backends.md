@@ -241,6 +241,12 @@ Alt+Space still use that loop, so nothing else in the process draws while a
 window is being moved, and a resize that this window performs loses the edge
 snapping the shell's own loop gives a dragged border.
 
+A window that declares a minimum has that floor on both routes: `WM_GETMINMAXINFO`
+answers `tracked_minimum`, which converts the spec's logical client area into a
+window size through the window's DPI and frame, and `sizing_step` clamps the drag
+it performs itself to the same value, taking the larger of the spec's floor and
+`SM_CXMINTRACK`/`SM_CYMINTRACK`.
+
 A layer surface opens as a `WS_POPUP` window with `WS_EX_TOOLWINDOW`, so it stays
 out of Alt+Tab and the taskbar. `Overlay` and `Top` add `WS_EX_TOPMOST`; `Bottom`
 and `Background` open as ordinary windows, since Win32 has no supported way to sit
@@ -1145,6 +1151,16 @@ running settings window: with `AppsUseLightTheme` set to 1 the form and its capt
 light; setting the value to 0 and broadcasting `WM_SETTINGCHANGE` turned the same window
 dark without a restart. The value was restored to 0 afterwards.
 
+**A border drag could shrink a window past what its content could lay out.** The Win32
+backend performed the drag itself but knew no minimum, so a window could be dragged narrower
+than a row of its form: the settings window's field is 592 logical pixels inside 24 of
+padding, and below 640 the rows ran out of width and overflowed the frame. The drag now
+clamps through `tracked_minimum`, the same helper that answers `WM_GETMINMAXINFO`, and both
+take the larger of the declared floor and the system's `SM_CXMINTRACK`/`SM_CYMINTRACK`.
+Checked by `resize_probe`: a surface that declares its opening size as its minimum is told
+`ptMinTrackSize` equal to the window rectangle it opened with, and a 240-by-160 inward drag
+from the bottom-right corner leaves the client area at that opening size.
+
 ## Status
 
 Implemented: both presenters, dma-buf zero-copy, explicit sync, HDR targets,
@@ -1154,8 +1170,9 @@ Windows, and a Win32 window that presents it through a DXGI flip-model swap
 chain that follows its output into HDR in whichever of PQ and scRGB that output
 presents and falls back to 8-bit sRGB, feeds
 pointer, keyboard and clipboard events back to the loop, paints its caption in the system's
-light or dark scheme, resizes itself on a border drag so a frame follows every move, and
-hosts the gallery.
+light or dark scheme, resizes itself on a border drag so a frame follows every move and stops
+at the minimum the spec declares on both that drag and the shell's own sizing, and hosts the
+gallery.
 Both window backends implement the portable `HostSession` trait, so an app's
 loop is written once and names no backend; the Win32 implementation is
 built and exercised on this machine, the Wayland one is checked by reading each

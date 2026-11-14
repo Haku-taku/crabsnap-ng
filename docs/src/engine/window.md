@@ -88,6 +88,20 @@ The engine's own place in this is narrow: it hands the spec to the backend and r
 `SurfaceKind::LayerSurface`, which is what decides that the surface owns an input region
 ([Pointer model](./pointer-model.md#the-surfaces-input-shape)).
 
+A window may also declare a floor: `SurfaceSpec::window(..).with_min_size((width, height))`
+names the smallest client area, in logical units, a user may drag the window to. It is a
+client size because that is what layout sees; a backend adds whatever its own sizing rules
+count (the Win32 window converts it through `AdjustWindowRectExForDpi`). A layer ignores it,
+since the spec's anchors, size and margin place a layer and no user resizes one. The floor
+reaches the user, not the engine: a program that asks for a smaller size still gets it, and
+the floor never clips a frame or constrains layout — it only keeps a window from being
+dragged narrower than its content can lay out. Wayland forwards it to
+`xdg_toplevel::set_min_size`; the Win32 window answers `WM_GETMINMAXINFO` so the shell's
+sizing loop stops there, and applies the same floor in the border drag it performs itself,
+which never reaches that loop. `resize_probe` checks both routes: the shell's answer equals
+the declared window rectangle, and an inward drag of 240 by 160 pixels leaves the client area
+at the size it started from.
+
 ## Layer placement and the keyboard
 
 A layer surface says where it goes through four booleans, a size, and a margin. With
