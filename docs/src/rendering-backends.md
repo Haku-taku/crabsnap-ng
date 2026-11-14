@@ -260,15 +260,21 @@ the rectangle back, and the release ends it. The app loop therefore keeps
 running through the drag, and every move is followed by a frame built for the
 new size. `DefWindowProcW`'s sizing loop would instead block this thread until
 the button came up, which is why the last frame used to be stretched across the
-growing window by DWM. A title-bar press is recorded and replayed by the host
-loop with a frame pump armed: the replayed copy reaches `DefWindowProc`, so the
-shell activates, raises, moves and snaps the window exactly as it does for a
-window without an engine, the moved surface draws from that pump, and every
-other surface draws through the host's rest-of-the-loop hook, so one window's
-gesture does not hold the rest of the process at their last frame. `SC_SIZE` from the
-system menu and Alt+Space still use that loop without a pump, so those still
-block. A resize that this window performs loses the edge snapping the shell's
-own loop gives a dragged border.
+growing window by DWM. A title-bar press goes to `DefWindowProc` unchanged, so
+the shell activates, raises, moves and snaps the window in the same call stack a
+window without an engine gets — no recorded press, no replay, no delay between
+the press and the window following the pointer. `WM_ENTERSIZEMOVE` arms a timer
+for the duration of that loop, and that timer is the one thing the loop
+dispatches besides input, so every surface draws from it: the one being moved
+through `pump_moved`, the rest through the host's rest-of-the-loop hook. The
+tick is a coarse one — `SetTimer` here lands near twelve milliseconds, about
+eighty ticks a second — which is the ceiling on a frame during a move, against
+the output's own rate when nothing is being dragged. No surface pumps the
+thread's queue while the loop runs: that queue is the loop's, and a peek here
+would dispatch a move's own mouse messages outside the loop, which stops the
+window following the pointer. `SC_SIZE` from the system menu and Alt+Space take
+the same loop, so they draw too. A resize that this window performs loses the
+edge snapping the shell's own loop gives a dragged border.
 
 A window that declares a minimum has that floor on both routes: `WM_GETMINMAXINFO`
 answers `tracked_minimum`, which converts the spec's logical client area into a
@@ -1364,16 +1370,49 @@ attempt called `SetForegroundWindow` from the taking branch; that reproduced one
 the skipped path, not the path, and left the rest of it — the move loop, its snapping, the
 activation order — observed by hand instead of run by the shell.
 
-The press is now replayed, not replaced: the procedure records the press and returns 0,
-the host loop arms the pump and sends `WM_NCLBUTTONDOWN`/`HTCAPTION` with the same screen
-point back through the procedure, and a `replay_move` flag sends that copy to
-`DefWindowProc` untouched. The default procedure activates and raises the window and runs
-its move loop to the release, with `WM_TIMER` building frames inside it. Nothing in the
-backend raises or activates the window itself any more, and the press the shell sees is the
-one a plain window sees. Verified by posting `WM_NCLBUTTONDOWN`/`HTCAPTION` to the lower of
-two windows and reading `EnumWindows`' order back: 120 alternating presses each left the
-pressed window first, and the process neither crashed nor hung. A hand drag remains
-`[unverified]` for the reason above.
+A second attempt replayed the press instead: the procedure recorded it, returned 0, and the
+host loop sent `WM_NCLBUTTONDOWN`/`HTCAPTION` back through the procedure with a frame pump
+armed. That restored activation, raising and snapping, but a hand drag still stopped for a
+moment when the pointer went down — the shell could not start the move until the next turn,
+and the pump's timer had to wait for the press. Qt settles the trade the other way: its
+Windows plugin hands `WM_NCLBUTTONDOWN` to `DefWindowProc` with nothing recorded, tracks
+`WM_ENTERSIZEMOVE` with a `ResizeMoveActive` flag, and accepts that the surface keeps its
+last frame while the loop runs.
+
+The backend now does what Qt does, and keeps every window drawing through it. The press is
+passed through untouched, so the window follows the pointer in the same call stack as any
+other window. `WM_ENTERSIZEMOVE` records that the shell's loop owns this thread and arms a
+timer on an id of its own, clear of a drag's; `WM_EXITSIZEMOVE` clears both. The loop
+dispatches `WM_TIMER` and nothing else of the engine's, so the moved surface and the rest of
+the process draw from that tick alike: the host asks each surface whether a move loop has it
+and calls `pump_moved` for the ones that do, and its rest-of-the-loop hook steps the others.
+
+Three things had to follow from that, and the first attempt shipped without any of them: it
+froze both windows.
+
+- A tick must not pump the thread's queue. The move loop is reading that queue, and a peek
+  here dispatches a move's own mouse messages outside the loop, so the window stops
+  following the pointer. `modal::inside` now answers for the shell's loop as well as for a
+  gesture's tick, and every step honours it.
+- A tick must not nest. `pump_moved` and the host's hook run from the same timer, and a step
+  of either reaches the queue again; the busy flag now covers the path with no pump of its
+  own, not only the armed one.
+- The pump must be armed before the step that dispatches the press, not around one call that
+  pumps messages. A step pumps in two places — the window's own and the driver's intake —
+  and the press is usually taken by the second, so a pump installed around the first was
+  never there when the move loop started. The host's answer covers the common case, a press
+  that arrives while the loop is waiting; the session's own pump covers one taken inside a
+  step.
+
+Verified with synthetic drags — a press on the title bar, a cursor sweep, a release. Twelve
+seconds with four drags produced 5906 frames against 5898 for the same run with none, and
+two twenty-second runs with six drags each produced 9841 and 9740: about 490 frames a second
+throughout, no crash, no hung loop. The same twelve-second run produced 4836 before this
+change. One window held by its title bar for six seconds produced 4064 frames, against 3524
+when the moved surface was not drawn. Posted `WM_NCLBUTTONDOWN`/`HTCAPTION` presses still
+raise the window on the press: 40 of 40 here, 120 of 120 before. A hand drag remains
+`[unverified]`: the soaks drive the pointer from a script, and how the window feels under a
+real hand is the one thing they cannot report.
 
 What the composition chain gives up is DWM-side pacing: with `Present(0)` and the waitable,
 the chain's event was set again within microseconds of each `Present` here, so the thread ran
