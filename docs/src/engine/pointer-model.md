@@ -103,6 +103,79 @@ other gesture.
   the start of the frame, so a control's root can answer `clicked_within` even
   when a descendant was hit.
 
+## Drag and drop {#drag-and-drop}
+
+A drag can carry a payload, and the payload can cross the surface boundary: out to the
+desktop, in from another application, or between two nodes of one surface. The gesture
+machinery above is unchanged — a press that travels past the threshold is still the one
+`DRAG` owner's drag — and the payload rides on the declaration instead of the event stream.
+
+### Declaring
+
+| Builder | On the node | Also sets |
+| --- | --- | --- |
+| `Decl::drag_data(data)` | the payload a drag from this node carries | `Sense::DRAG` |
+| `Decl::drag_out()` | hand the gesture to the operating system instead of keeping it in-app | — |
+| `Decl::accept_drop(types)` | the MIME patterns this node takes | `Sense::DROP` |
+
+`Container` forwards all three, and `Decl` is what every element already builds, so no
+element needs to know drag and drop exists.
+
+The payload is a `DragData`: a list of `DragItem { mime, data }` representations plus a
+`DropEffect` (`Copy` by default, `Move`, `Link`). Patterns compare ASCII-insensitively, and
+`*`, `*/*`, and a family such as `text/*` are patterns; anything else is an exact type. A
+`DROP` node that never called `accept_drop` — a plain `sense(Sense::DROP)` — takes any
+drag, which is what gesture-only dragging did before payloads existed.
+
+### Inside the surface
+
+A source without `drag_out` keeps the drag internal. The engine tracks the pointer, walks
+up from the hit to the nearest node that declares `DROP` and accepts one of the offered
+types, and reports:
+
+- the target: `Change::DragEntered { types }` when it becomes the target, `DragExited` when
+  it stops being one, and `DroppedOn(data)` when the release lands on it;
+- the source: `DragStarted`, `Moved`, `Dropped(Some(target))` or `Cancelled`.
+
+`cx.drag_over_within(id)` (and `WidgetState::drag_over`) is true while the live drag's
+target is the node or inside it, which is what a highlight reads; `cx.drag_types()` is what
+the drag offers. Both record a cache dependency (`Dep::DragOverWithin`, `Dep::DragTypes`),
+so a declaration that read one is rebuilt when the target or the offered types change.
+
+The source hears the target's entry before its own `DragStarted`, so a highlight that reads
+the source's state sees it already settled. A drop ends the hover without a `DragExited`:
+`DroppedOn` is the exit.
+
+### To and from the operating system
+
+`drag_out()` makes the threshold crossing hand the gesture to the host instead, on the same
+frame. Only the source is tracked in-app from then on: the host reports the ending as
+`Event::Dnd(DndEvent::Finished { dropped })`, which becomes `Dropped(None)` — another
+window took it, or none did — or `Cancelled`. Because the host owns the pointer for the
+whole gesture, the release never reaches this loop; the engine settles the press (and its
+ink) when `Finished` arrives.
+
+An incoming drag arrives as `Event::Dnd` phases: `Entered { pos, types }`, `Over { pos }`
+(many), then either `Dropped { pos, data }` or `Left`. The payload is revealed only at the
+drop. `AppLoop::drop_effect()` is the effect the resolved target negotiated, which each host
+publishes to the operating system so the pointer shows it.
+
+| Platform | Incoming | Outgoing |
+| --- | --- | --- |
+| Win32 | OLE `IDropTarget` on the window thread; every clipboard format the table can decode is read back at the drop | `DoDragDrop` on a worker STA thread, so the window keeps painting; the payload is exported in the formats `clipboard::item_formats` knows |
+| Wayland | `wl_data_device.enter`/`motion`/`drop`/`leave`; every announced MIME is read down its own pipe after the drop, bounded by type count, size, and a two-second timeout | `wl_data_source.start_drag` with the action the payload means, `dnd_finished`/`cancelled` as the outcome |
+
+Two losses are the protocols', not the engine's. Wayland has no link action, so a `Link`
+payload is offered as `Copy`; and a Win32 payload whose types have no Windows form (anything
+but text, files, PNG, or a DIB) cannot leave the process, and the gesture is cancelled.
+Wayland has no such restriction.
+
+On Win32 the drop target answers `DROPEFFECT_COPY` before the first frame has resolved a
+target — OLE asks during `DragEnter` — and the window replaces it with the engine's effect on
+every subsequent frame. On Wayland the destination accepts the first offered type at
+`enter` for the same reason: a version-3 drag nobody accepts is cancelled outright, and the
+engine's own verdict needs a frame that has not been built yet.
+
 ## Frame demand
 
 Continuous pointer samples are absorbed unless they can change a pixel.
@@ -263,3 +336,33 @@ when the pointer leaves, `OnDemand` when it arrives. What catches it now is the 
 behaviour (`docs/notes/pin-keyboard-follows-hover.md` there), unverified here; the Hyprland
 source in this checkout matches it, and the running compositor is one release ahead of that
 checkout.
+
+**A drag-out left its source pressed.** The operating system takes pointer capture for a
+native drag, so the `PointerReleased` this loop waits for never arrives; the source kept
+`pressed`, its ink, and its splat after the gesture had ended. `DndEvent::Finished` now
+settles the press where the engine keeps it, and a host that refuses `begin_drag` (no payload
+format it can carry) reports the same ending, so the loop never believes the button is still
+down. The engine's four DnD contract tests cover the payload paths; the press settling and the
+two platform hosts' live gestures are not yet run end to end.
+
+**A drag the engine had not judged yet needed an answer before its first frame.** OLE asks
+`IDropTarget::DragEnter` for a `DROPEFFECT` immediately, and a version-3 Wayland drag nobody
+accepts is cancelled outright. Both hosts start with a permissive answer — `DROPEFFECT_COPY`
+on Win32, the first offered MIME on Wayland — and the engine replaces it on every frame after
+the first build (`AppLoop::drop_effect`) so the pointer shows the target's real verdict.
+
+**DoDragDrop is modal, and the window is not.** Running it on the window's thread would stop
+painting for the whole gesture, and OLE's own message loop does not service this engine's
+frame timers. The Win32 backend runs it on a worker STA thread (`OleInitialize` there), posts
+the outcome as `WM_DND_FINISHED`, and lets the window thread keep building frames; incoming
+drags are ordinary `IDropTarget` callbacks on the window's own thread. The engine never
+learns where a native drop landed — another process owns that decision — so the source hears
+`Dropped(None)` or `Cancelled`, and a same-window drop arrives back through the drop target
+with the payload decoded, exactly as a foreign drag would.
+
+**One drag state served both directions.** An in-app drag knows its payload from the press; a
+native drag learns it only at the release. Two sessions would have duplicated target
+resolution, cache dependencies, and the hover highlight, so `DragSession` holds both and its
+`types_decide` says when the offered types decide a target: a started gesture with no payload
+still lets any `DROP` node take it. The Wayland host adds its own reading of the same rule —
+`wl_data_device.enter` must be answered before the engine's first frame can decide.

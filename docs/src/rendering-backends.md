@@ -1171,6 +1171,20 @@ The real gap is drag-and-drop itself: no window handles `WM_DROPFILES` or regist
 and by searching the workspace for `WM_DROPFILES`, `DragAcceptFiles` and `IDropTarget`, which
 have no hits.
 
+**Drag and drop reached the pointer model and both windows.** The engine now has a payload
+(`ui_core::dnd`), `Sense::DROP` targets that match offered MIME patterns, and one
+`DragSession` for both an in-app gesture and a foreign drag; see
+[Pointer Model § Drag and drop](./engine/pointer-model.md#drag-and-drop). The Win32 window
+registers an `IDropTarget` and answers every callback from the clipboard format table, and
+starts an outgoing drag on a worker STA thread because `DoDragDrop` is modal; the Wayland
+window handles `wl_data_device.enter`/`motion`/`drop`/`leave` and starts its own drags with
+`wl_data_source.start_drag`, reading the dropped payload from every announced MIME down its
+own pipe. Checked by four `ui-platform` contract tests over the engine's DnD events, the
+`ui-platform` suite (159 passed; the 11 failures are the pre-existing text-selection ones),
+and a `cargo check --target x86_64-unknown-linux-gnu` for the Wayland crate. The live
+gestures — a file from Explorer into the gallery, a card out into another application, and
+the Wayland wire check — have not been run yet.
+
 ## Status
 
 Implemented: both presenters, dma-buf zero-copy, explicit sync, HDR targets,
@@ -1179,7 +1193,8 @@ fractional scaling, a D3D11 device that renders the whole `DrawList` on
 Windows, and a Win32 window that presents it through a DXGI flip-model swap
 chain that follows its output into HDR in whichever of PQ and scRGB that output
 presents and falls back to 8-bit sRGB, feeds
-pointer, keyboard and clipboard events back to the loop, paints its caption in the system's
+pointer, keyboard, clipboard and drag-and-drop events back to the loop, takes drops from
+other applications and starts its own drags into them, paints its caption in the system's
 light or dark scheme, resizes itself on a border drag so a frame follows every move and stops
 at the minimum the spec declares on both that drag and the shell's own sizing, and hosts the
 gallery.
