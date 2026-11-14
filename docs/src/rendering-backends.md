@@ -254,10 +254,12 @@ new size. `DefWindowProcW`'s sizing loop would instead block this thread until
 the button came up, which is why the last frame used to be stretched across the
 growing window by DWM. A title-bar press is deferred to the host loop, which
 starts the system's move with a frame pump armed: the shell still moves and
-snaps the window, and the process keeps drawing inside its loop. `SC_SIZE` from
-the system menu and Alt+Space still use that loop without a pump, so those
-still block. A resize that this window performs loses the edge snapping the
-shell's own loop gives a dragged border.
+snaps the window, the moved surface draws from that pump, and every other
+surface draws through the host's rest-of-the-loop hook, so one window's gesture
+does not hold the rest of the process at their last frame. `SC_SIZE` from the
+system menu and Alt+Space still use that loop without a pump, so those still
+block. A resize that this window performs loses the edge snapping the shell's
+own loop gives a dragged border.
 
 A window that declares a minimum has that floor on both routes: `WM_GETMINMAXINFO`
 answers `tracked_minimum`, which converts the spec's logical client area into a
@@ -1298,6 +1300,28 @@ blocked `Present` was costing: 7 ms of input dispatch per frame, now zero on the
 `Present(0)` on the render thread returned in microseconds and the loop spun at ~6800 fps,
 which is what makes `Present(1)` there — rather than another waitable plumbed through the
 loop — the pacing point.
+
+**One window's title-bar move froze every other window in the process.** A title-bar move
+(`SendMessage(WM_SYSCOMMAND, SC_MOVE)`) and an outgoing OLE drag (`DoDragDrop`) run the
+shell's own message loop on the process's only UI thread and do not return until the pointer
+is released. The surface that started the gesture drew itself from the loop's timer, but a
+`Host` steps its surfaces only in `turn`, and that call is suspended for the whole gesture:
+in `two_windows`, dragging the first window held the second at its last frame. The timer's
+tick now also asks the host for the rest of the loop
+(`ui_platform::modal::pump_others`): every surface except the one in the gesture is stepped,
+its copies are served, and a failing one is retired as a turn would. The host hands that
+hook in by taking the stepping surface out of its surface list for the duration of its
+step, so the others stay reachable without two mutable borrows. The tick also stops the
+platform from pumping the thread's messages itself, because the shell's loop is dispatching
+them and a peer pump would take them out from under the gesture. A nested gesture (a
+second title-bar press arriving during the first) is refused the timer rather than
+replacing the outer gesture's pump. Covered by
+`a_modal_gesture_pumps_the_other_surfaces` in `ui-platform/tests/host_loop.rs`, which calls
+the hook from a surface's step and finds the other surface stepped while that step is on
+the stack. The physical gesture itself could not be driven from this session — `SendInput`
+is accepted and has no effect on this desktop — so that the other window visibly keeps
+animating under a real drag is `[unverified]` here; the loop-level branch is what was
+tested.
 
 ## Status
 

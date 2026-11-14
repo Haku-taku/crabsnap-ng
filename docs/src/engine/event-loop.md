@@ -109,6 +109,17 @@ the turn. Turning again is not the same as drawing, though: a surface builds onl
 is due, so `MessageCtx::add_image` and `request_frame` each ask the surface for one. Without
 that a pin added to a canvas that is already up is held by the board and never painted.
 
+## Modal gestures
+
+A title-bar move, an OLE drag or a compositor grab runs a message loop of its own and does
+not return until the pointer is released, so the host's `turn` cannot run for its duration.
+The platform keeps the surface that started the gesture alive from that loop's timer, and
+the host arms a `modal::pump_others` hook around every surface's step: the same timer then
+steps every other surface too, so one window's gesture does not freeze the rest of the
+process. The stepping surface is out of the host's list for that moment — that is what lets
+the hook reach the others — and the platform does not pump the thread's messages during the
+tick, because the gesture's own loop is already dispatching them.
+
 ## Services
 
 | Service | Portable form | What the backend does |
