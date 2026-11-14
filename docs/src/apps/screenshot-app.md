@@ -548,8 +548,13 @@ frame is wider than its text, which is what the side grips are for: they set the
 width and leave the type its size, while a corner maps the whole mark. A live
 field draws the mark no copy of it: the canvas paints the frame, the wash and
 the paragraph, and the field is a transparent keyboard stop over the same box
-that adds the caret and the selection. Editing and the exported file are one
-rendering because they are one list.
+that adds the caret and the selection. An input method's composition is painted
+the same way: the canvas splices the preedit into the paragraph at the caret
+(`Document::draw_composing`), so the composing text takes the mark's own type,
+wrap and frame, and the composition is part of the canvas version, which is what
+makes the canvas repaint per keystroke. The document, the loupe and every file
+still hold only committed text. Editing and the exported file are one rendering
+because they are one list.
 
 A selection that carries marks and is not already 8-bit sRGB is converted to the
 SDR rendition a file gets (`Cropped::sdr`) before the marks go on: that rendition
@@ -1011,6 +1016,20 @@ pinned shortcut under. The manifest's declarations are checked by extracting it 
 `GetProcessDpiAwareness` answering `2`, and by `info status` printing the identity back; the icon
 is checked by extracting it from the exe. What would catch a regression is the build failing on
 `rc.exe` (`embed-resource` reports the resource compiler's own error) rather than a test.
+
+**An input method's composition was invisible in a text mark.** The canvas is the only painter of
+a mark and the field over it is a transparent keyboard stop, so the preedit the engine kept for
+that field went to the field's own `Text` — which paints nothing visible — and the composing
+string appeared only when it was committed. `Session::composing` now reads the field's preedit
+and caret, `Document::draw_composing` splices it there through the same `composed` the engine's
+fields use, and `Document::version` folds the preedit, so the canvas bakes a new revision per
+keystroke. Both canvas paths pass it; the loupe's window and every export still receive none,
+since a file and a magnifier hold committed text. What catches it now:
+`a_composition_paints_where_its_commit_would_land` paints `xy` at caret 1 of `abc` and asserts
+the prim reads `axybc` with the composing range `1..3`, while the plain list still reads `abc`.
+Not yet checked with a live input method: the Pinyin service on this machine is out of process,
+so this field composes through IMM32, whose composition path `ime` exercises at the backend
+level rather than through this editor.
 
 ## See also
 

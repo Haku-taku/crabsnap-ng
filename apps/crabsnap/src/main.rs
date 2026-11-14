@@ -2065,12 +2065,13 @@ impl App for Overlay {
         // the frame is painted once, so a selection's inside and outside are the same
         // picture. A frame with no marks declares no canvas at all.
         let picture = (self.image.width, self.image.height);
+        let composing = self.annotate.composing(cx, root);
         if !self.document.is_empty() {
             cx.canvas(Canvas {
                 id: CanvasId(MARKS_TEXTURE),
                 size: picture,
-                version: self.document.revision(),
-                list: pin::content::marks(&self.document, picture),
+                version: self.document.version(composing.as_ref()),
+                list: pin::content::marks(&self.document, picture, composing.as_ref()),
             });
             cx.register_image(ImageEntry {
                 id: MARKS_TEXTURE,

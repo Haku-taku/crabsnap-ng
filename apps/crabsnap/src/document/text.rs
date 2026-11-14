@@ -142,6 +142,10 @@ impl TextMark {
 
     /// The paragraph both the picture and the field draw: the same text, size and alignment.
     pub fn block(&self) -> TextBlock {
+        self.block_of(self.text.clone())
+    }
+
+    fn block_of(&self, text: String) -> TextBlock {
         let mut style = TextStyle::new(self.size);
         if let Some(color) = self.outline
             && self.outlined()
@@ -149,7 +153,7 @@ impl TextMark {
             style = style.outline(self.outline_width, color);
         }
         TextBlock {
-            runs: vec![TextRun::new(self.text.clone(), style)],
+            runs: vec![TextRun::new(text, style)],
             align: self.align,
             ..Default::default()
         }
@@ -240,7 +244,16 @@ impl TextMark {
     }
 
     /// Draw the frame and its text into `list`, in image pixels.
-    pub fn paint(&self, list: &mut DrawList, owner: NodeId, style: &Style) {
+    ///
+    /// `composing` is the caret and the input method's unfinished bytes: they join the
+    /// paragraph where their commit would land, and the engine underlines them.
+    pub fn paint(
+        &self,
+        list: &mut DrawList,
+        owner: NodeId,
+        style: &Style,
+        composing: Option<(usize, &ui_core::Preedit)>,
+    ) {
         let frame = self.frame();
         if self.background.is_some() || self.border.is_some() {
             list.push_rect(
@@ -256,10 +269,17 @@ impl TextMark {
                 },
             );
         }
+        let (shown, composed) = match composing {
+            Some((caret, preedit)) if !preedit.is_empty() => {
+                let (shown, at) = ui_core::text_input::composed(&self.text, &preedit.text, caret);
+                (shown, Some(at..at + preedit.text.len()))
+            }
+            _ => (self.text.clone(), None),
+        };
         list.push_text(
             owner,
             TextPrim {
-                block: Rc::new(self.block()),
+                block: Rc::new(self.block_of(shown)),
                 origin: Point::new(
                     frame.origin.x + self.padding,
                     frame.origin.y + self.padding,
@@ -270,7 +290,7 @@ impl TextMark {
                 ink: style.ink,
                 caret: None,
                 selection: None,
-                composing: None,
+                composing: composed,
                 shape_scale: 1.0,
                 zoom: None,
             },

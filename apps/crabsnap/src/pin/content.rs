@@ -21,7 +21,7 @@ use ui_platform::element::Element;
 use crabsnap_core::media::Kind;
 
 use crate::capture::{Cropped, Light};
-use crate::document::{Document, Space};
+use crate::document::{Composing, Document, Space};
 use crate::pin::badge::{Anchor, Badge, Policy, Show, Tone};
 use crate::pin::edit::{self, Session};
 use crate::pin::{ExportAsk, Exported, PinContent, PinFrame, card};
@@ -102,8 +102,8 @@ impl Bitmap {
     }
 
     /// The list a canvas paints: the picture at 1:1, then the marks over it.
-    fn composed(&self, texture: u64) -> DrawList {
-        painted(&self.image, &self.document, texture)
+    fn composed(&self, texture: u64, composing: Option<&Composing>) -> DrawList {
+        painted(&self.image, &self.document, texture, composing)
     }
 }
 
@@ -182,26 +182,41 @@ fn rasterize(list: &DrawList, pixels: &mut Pixels) {
 }
 
 /// The picture at 1:1, then the marks over it.
-fn painted(image: &Cropped, document: &Document, texture: u64) -> DrawList {
-    shifted(image, document, texture, Point::ZERO)
+fn painted(
+    image: &Cropped,
+    document: &Document,
+    texture: u64,
+    composing: Option<&Composing>,
+) -> DrawList {
+    shifted(image, document, texture, Point::ZERO, composing)
 }
 
 /// The same list, its primitives moved by `offset` so that a raster of it starts at the
 /// window the caller wants.
-fn shifted(image: &Cropped, document: &Document, texture: u64, offset: Point) -> DrawList {
+fn shifted(
+    image: &Cropped,
+    document: &Document,
+    texture: u64,
+    offset: Point,
+    composing: Option<&Composing>,
+) -> DrawList {
     let mut list = DrawList::new(Rect::new(0.0, 0.0, image.width as f32, image.height as f32));
     // The list transforms each primitive as it is pushed, so this has to be in force first.
     list.transform = Some(Transform { scale: 1.0, offset });
     push_picture(&mut list, image, texture);
-    document.draw(&mut list);
+    document.draw_composing(&mut list, composing);
     list
 }
 
 /// The marks alone, on the picture's own pixel grid: the overlay's layer over the frozen
 /// frame, so the frame is painted once and a mark cannot part company with it.
-pub(crate) fn marks(document: &Document, size: (u32, u32)) -> DrawList {
+pub(crate) fn marks(
+    document: &Document,
+    size: (u32, u32),
+    composing: Option<&Composing>,
+) -> DrawList {
     let mut list = DrawList::new(Rect::new(0.0, 0.0, size.0 as f32, size.1 as f32));
-    document.draw(&mut list);
+    document.draw_composing(&mut list, composing);
     list
 }
 
@@ -235,6 +250,7 @@ pub(crate) fn window(image: &Cropped, document: &Document, win: Rect) -> Cropped
         document,
         0,
         Point::new(-win.origin.x, -win.origin.y),
+        None,
     );
     rasterize(&list, &mut pixels);
     Cropped {
@@ -358,12 +374,16 @@ impl PinContent for Bitmap {
         if self.document.measure(cx) {
             cx.invalidate_decls();
         }
+        let composing = self
+            .edit
+            .as_ref()
+            .and_then(|session| session.composing(cx, frame.id));
         if !self.document.is_empty() {
             cx.canvas(Canvas {
                 id: CanvasId(frame.texture),
                 size: (self.image.width, self.image.height),
-                version: self.document.revision(),
-                list: self.composed(frame.texture),
+                version: self.document.version(composing.as_ref()),
+                list: self.composed(frame.texture, composing.as_ref()),
             });
         }
         let sampling = if self.edit.is_some() {

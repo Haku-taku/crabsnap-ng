@@ -17,7 +17,7 @@ use crate::capture::Cropped;
 use crate::document::path::{PathAnchor, PathMark};
 use crate::document::text::{MAX_PADDING, MAX_RADIUS, MAX_SIZE, MIN_SIZE};
 use crate::document::{
-    Document, Edit, Heads, Line, Mark, MarkId, MarkKind, Sides, Space, Style, TextMark,
+    Composing, Document, Edit, Heads, Line, Mark, MarkId, MarkKind, Sides, Space, Style, TextMark,
 };
 use crate::loupe;
 use crate::toolbar;
@@ -1603,6 +1603,23 @@ impl Session {
         true
     }
 
+    /// The composition an open text field is showing, if any.
+    ///
+    /// The bytes live in the engine, not the document: the mark keeps only what the input
+    /// method committed, so a cancelled composition leaves no edit behind.
+    pub(crate) fn composing(&self, cx: &Cx<'_>, node: Id) -> Option<Composing> {
+        let edit = self.text.as_ref()?;
+        let field = text_field_id(node);
+        let preedit = cx
+            .preedit_for(field)
+            .filter(|preedit| !preedit.is_empty())?;
+        Some(Composing {
+            id: edit.id,
+            caret: cx.caret_for(field)?,
+            preedit,
+        })
+    }
+
     /// Close the field: an empty mark leaves nothing behind, a typed one becomes one step
     /// of history.
     fn finish_text(&mut self, document: &mut Document) -> bool {
@@ -1892,6 +1909,11 @@ fn text_field(
         None => f32::INFINITY,
     };
     let caret = cx.caret_for(field).unwrap_or(mark.text.len());
+    let preedit = cx.preedit_for(field);
+    // The composition draws where its commit would land, and the caret after it; the
+    // canvas beneath draws the same splice, so the two cannot part company.
+    let (shown, composing, caret_at) =
+        ui_widgets::text::typed_input(&mark.text, Some(caret), preedit.as_ref());
     let selection = cx
         .selection_for(field)
         .filter(|selection| !selection.is_collapsed())
@@ -1900,16 +1922,14 @@ fn text_field(
             fill: Color::from_rgba8(80, 160, 255, 110),
             painter: None,
         });
-    let text = ui_widgets::text::Text::new(
-        field.with("text"),
-        mark.text.clone(),
-        size,
-        Color::TRANSPARENT,
-    )
-    .max_width(width)
-    .align(mark.align)
-    .caret(caret, ink)
-    .painting(selection);
+    let mut text = ui_widgets::text::Text::new(field.with("text"), shown, size, Color::TRANSPARENT)
+        .max_width(width)
+        .align(mark.align)
+        .composing(composing)
+        .painting(selection);
+    if let Some(at) = caret_at {
+        text = text.caret(at, ink);
+    }
     let rows = vec![
         MenuItem::new(
             Id::str("pin-edit/finish-text"),

@@ -20,6 +20,15 @@ pub use text::TextMark;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MarkId(u64);
 
+/// The bytes an input method is composing over one text mark: drawn, not committed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Composing {
+    pub id: MarkId,
+    /// Where the composition starts, in bytes of the mark's committed text.
+    pub caret: usize,
+    pub preedit: ui_core::Preedit,
+}
+
 /// How a mark is painted, in image pixels.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Style {
@@ -469,10 +478,37 @@ impl Document {
     /// canvas samples and what an export rasterizes. A mark being typed is one of them:
     /// the field over it adds the caret, and nothing redraws the text a second way.
     pub fn draw(&self, list: &mut DrawList) {
+        self.draw_composing(list, None);
+    }
+
+    /// The same, with an input method's unfinished bytes shown over one mark.
+    ///
+    /// A preedit is not part of the document: it is drawn where its commit would land, and
+    /// an export never sees it because that path calls [`Document::draw`].
+    pub fn draw_composing(&self, list: &mut DrawList, composing: Option<&Composing>) {
         let owner = DrawList::canvas_owner();
         for (id, mark) in &self.marks {
-            draw_mark(list, owner, id.0, self.revision, mark);
+            draw_mark(
+                list,
+                owner,
+                id.0,
+                self.revision,
+                mark,
+                composing.filter(|composing| composing.id == *id),
+            );
         }
+    }
+
+    /// The revision a canvas built with `composing` paints, so a preedit repaints.
+    pub fn version(&self, composing: Option<&Composing>) -> u64 {
+        let Some(composing) = composing else {
+            return self.revision;
+        };
+        let mut version = self.revision;
+        for byte in composing.preedit.text.bytes() {
+            version = version.rotate_left(5) ^ u64::from(byte);
+        }
+        version ^ ((composing.caret as u64) << 32) ^ composing.preedit.cursor as u64
     }
 
     /// Place a mark history does not know yet: a text mark exists while it is typed, and
@@ -532,7 +568,14 @@ impl Document {
     }
 }
 
-fn draw_mark(list: &mut DrawList, owner: ui_core::NodeId, id: u64, revision: u64, mark: &Mark) {
+fn draw_mark(
+    list: &mut DrawList,
+    owner: ui_core::NodeId,
+    id: u64,
+    revision: u64,
+    mark: &Mark,
+    composing: Option<&Composing>,
+) {
     let style = &mark.style;
     match &mark.kind {
         MarkKind::Rect(rect) => {
@@ -582,7 +625,10 @@ fn draw_mark(list: &mut DrawList, owner: ui_core::NodeId, id: u64, revision: u64
             }
         }
         MarkKind::Bezier(path) => path.paint(list, owner, id, revision, style),
-        MarkKind::Text(text) => text.paint(list, owner, style),
+        MarkKind::Text(text) => {
+            let composing = composing.map(|composing| (composing.caret, &composing.preedit));
+            text.paint(list, owner, style, composing);
+        }
     }
 }
 
@@ -835,5 +881,46 @@ mod tests {
             Point::new(402.5, 200.5)
         );
         assert_eq!(space.to_surface_length(4.0), 2.0);
+    }
+
+    /// An input method's unfinished bytes join the paragraph where their commit would land,
+    /// and the list an export paints stays the committed text.
+    #[test]
+    fn a_composition_paints_where_its_commit_would_land() {
+        let mut document = Document::new();
+        let mut text = TextMark::new(Point::ZERO);
+        text.text = "abc".to_owned();
+        let edit = document.insert_edit(Mark {
+            kind: MarkKind::Text(text),
+            style: Style::default(),
+        });
+        let id = edit.id;
+        document.commit(edit);
+
+        let composing = Composing {
+            id,
+            caret: 1,
+            preedit: ui_core::Preedit::new("xy", 1),
+        };
+        let mut shown = DrawList::new(Rect::new(0.0, 0.0, 64.0, 64.0));
+        document.draw_composing(&mut shown, Some(&composing));
+        let [prim] = shown.prims.texts.as_slice() else {
+            panic!("one mark must be one text, got {:?}", shown.prims.texts);
+        };
+        assert_eq!(prim.block.runs[0].text, "axybc");
+        assert_eq!(prim.composing, Some(1..3));
+        assert_ne!(
+            document.version(Some(&composing)),
+            document.version(None),
+            "the canvas must repaint while the composition moves"
+        );
+
+        let mut committed = DrawList::new(Rect::new(0.0, 0.0, 64.0, 64.0));
+        document.draw(&mut committed);
+        let [prim] = committed.prims.texts.as_slice() else {
+            panic!("one mark must be one text, got {:?}", committed.prims.texts);
+        };
+        assert_eq!(prim.block.runs[0].text, "abc");
+        assert_eq!(prim.composing, None);
     }
 }
