@@ -392,6 +392,11 @@ visible. The vertical phase applies to them as it does to any other script.
   per keystroke makes the input method restart composition.
 - On Wayland the backend buffers preedit, commit, and delete until `done`, then
   emits `DeleteSurrounding`, exactly one `Preedit`, then `Text`.
+- On Windows a focused non-secret field is a TSF document that publishes
+  `surrounding` as its text and holds the preedit as a splice at the caret; an
+  edit the input method makes to that document becomes the delete and the commit
+  above. Every other state uses IMM32, which carries the preedit and the commit
+  and nothing else.
 - A secret input sends no surrounding text and states `content_type` as
   `hidden_text | sensitive_data` with purpose `password`, so the method neither
   learns the value nor offers suggestions. Its previous neighbourhood is cleared
@@ -930,7 +935,9 @@ Implemented: font contracts, the fontique provider, shaping and line breaking,
 the paragraph's bidi base direction with relative alignment, UAX #9 L3 (a cut
 never separates a mark from its base, and reversal is by cluster),
 per-cluster emoji presentation, the glyph atlas with per-run batch
-rasterization over up to eight threads, IME on Wayland with the
+rasterization over up to eight threads, IME on Wayland and on Windows
+(the TSF document a focused field hands an input method, so its surrounding
+text and a delete beside it are served there), with the
 input's content purpose and hints (a secret buffer, a time field), hidden
 fields (a byte-preserving mask, no copy or cut, no
 surrounding text), a read-only selection that crosses blocks (derived spans,
@@ -942,10 +949,10 @@ app-requested edits through `Cx::edit_input`, app-requested focus through
 client-side key repeat from the seat's rate and delay, and Fluent with locale
 parity tests.
 
-Not implemented: IME on macOS or X11; on Windows the IMM32 composition has no
-surrounding text, so `DeleteSurrounding` and a secret field's neighbourhood stay
-unserved there until TSF; content purposes beyond a secret buffer and a time
-field; COLR v1 paint graphs and SVG-in-OpenType colour; and typing or editing a
+Not implemented: IME on macOS or X11; on Windows a secret field's neighbourhood,
+because a secret field keeps the IMM32 path and IMM32 has no surrounding text (a
+focused non-secret field is a TSF document and serves both); content purposes
+beyond a secret buffer and a time field; COLR v1 paint graphs and SVG-in-OpenType colour; and typing or editing a
 read-only selection (it is selection and copy only).
 
 ## See also

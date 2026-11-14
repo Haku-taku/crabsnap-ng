@@ -308,17 +308,32 @@ through the read side, and `a_copied_path_becomes_a_file_uri` in
 `crates/ui-platform-win32/src/clipboard.rs`, with `a_windows_file_uri_names_a_drive_or_a_share`
 in `apps/crabsnap-core/src/uri_list.rs` for the path shapes the URI list is read back into.
 
-Input methods are IMM32. A frame's `ImeState` opens or closes the input context
-and puts the composition window at the caret, with the candidate list told to
-keep off the caret's own rectangle; both forms take window coordinates.
-`WM_IME_COMPOSITION` is read for two strings: the
-composition becomes `Event::Preedit` and the result becomes `Event::Text`. The
-IME's own composition window is suppressed, because the engine draws the preedit,
-and a secret buffer suppresses the candidate list too. `WM_IME_CHAR` is ignored:
-the result string is the same text in one piece, and the only path that keeps a
-surrogate pair whole. IMM32 has no surrounding text and no way to ask for the
-text around the caret to be deleted, so `ImeState`'s surrounding text and
-`Event::DeleteSurrounding` stay unserved there; both need TSF.
+Input methods take one of two paths. A focused field that is not secret is a TSF
+document: the window hands TSF an `ITextStoreACP` holding the field's surrounding
+text. Every other state, no field or a secret one, is IMM32. TSF is the only
+Windows path that carries the surrounding text: the store publishes
+`ImeState::surrounding` as the document, holds the input method's composition as a
+splice at the caret, and maps the composition to `Event::Preedit` and its commit to
+`Event::Text`. An edit that removes text beside the caret becomes
+`Event::DeleteSurrounding`, with the counts in the engine's UTF-8 bytes although the
+store indexes by UTF-16 code units. The document is created and associated with the
+window the first time a field asks for it, and if TSF refuses to start the window
+keeps IMM32 for the rest of its life. While the document is attached it owns the
+keyboard: each key is offered through `ITfKeystrokeMgr::TestKeyDown`/`KeyDown`,
+`WM_IME_*` is left unanswered, and the `WM_CHAR` that `TranslateMessage` still makes
+from a key an input method took is dropped rather than typed a second time. The store
+reports its layout (`OnLayoutChange`) whenever its text or caret moved, because an
+input method composes only where it has a rectangle for its candidate window; a frame
+that changed neither says nothing.
+
+The IMM32 path carries the rest. A frame's `ImeState` opens or closes the input
+context and puts the composition window at the caret, with the candidate list told
+to keep off the caret's own rectangle; both forms take window coordinates.
+`WM_IME_COMPOSITION` is read for two strings: the composition becomes
+`Event::Preedit` and the result becomes `Event::Text`. The IME's own composition
+window is suppressed, because the engine draws the preedit, and a secret buffer
+suppresses the candidate list too. `WM_IME_CHAR` is ignored: the result string is the
+same text in one piece, and the only path that keeps a surrogate pair whole.
 
 Measured with `cargo run -p ui-platform-win32 --example ime`: an unfocused
 window left the context closed and a caret opened it, a caret 20 by 40 logical
@@ -326,6 +341,21 @@ units placed the composition point at (25, 50) physical on a 1.25-scale monitor
 with the candidate form excluding the caret's rectangle, and an injected `a😀b`
 composition arrived as a preedit of 6 bytes with the caret at its end, which is
 what an injected composition reports.
+
+Measured with `cargo run -p ui-platform-win32 --example tsf_probe`: a field whose
+text was `hello world` with the caret at 5 gave TSF a focused document, an edit
+session run under the store's lock read `hello world` back out of it with the caret
+at 5, a posted `a` still arrived as `Event::Text`, and once the field went away the
+document left the thread's focus and a posted space reached the engine as a key.
+Live composition is what this machine cannot show: it registers Microsoft Pinyin
+only as an out-of-process text service, which no application on it starts — Notepad
+composes nothing either — so a preedit and a live delete-surrounding were never
+observed here. Their derivation is what the tests in
+`crates/ui-platform-win32/src/tsf.rs` pin:
+`a_composition_is_one_preedit_and_its_end_one_commit`,
+`a_removal_before_the_caret_asks_the_engine_for_surrounding_text`,
+`a_removal_counts_the_engines_bytes_not_tsfs_units`, and
+`a_range_inside_a_surrogate_pair_snaps_to_a_character_boundary`.
 
 The swap chain follows the output it lands on into HDR. An output the desktop is
 composing in `DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020` gets a
@@ -1033,6 +1063,20 @@ content moves left or up, so the vertical notch is negated and the horizontal on
 `input_probe` now asks for both steps and names the horizontal one; it printed FAIL with the
 message posted and no arm to take it, and PASS with the arm.
 
+**TSF would not take the store as it was first written.** Three calls failed with an HRESULT
+while `tsf_probe` was being made to read a field, each from one wrong assumption. A context
+created under `TF_CLIENTID_NULL` is refused with `E_INVALIDARG`: the client id must be the one
+`ITfThreadMgr::Activate` returned for this thread, which is also the id an edit session is
+requested under. A composition sink cannot be advised on a document, because
+`ITfSource::AdviseSink` for `ITfContextOwnerCompositionSink` answers `TS_E_NOOBJECT`: the
+manager queries the object handed to `CreateContext` for that interface and installs it itself,
+which is why the store now implements the sink rather than an advisor beside it. And
+`ITextStoreACP::GetText` must read `acpEnd == -1` as "to the end of the document": TSF reads
+the whole document that way, and the probe's edit session, which widens the range to the
+document's end before reading, came back empty until the store honoured it. That last one is
+what the probe pins today; the two refusals are what they were at the call, since this
+machine's input method never starts and so never notifies the sink.
+
 ## Status
 
 Implemented: both presenters, dma-buf zero-copy, explicit sync, HDR targets,
@@ -1056,8 +1100,10 @@ auto-hidden taskbar hides behind stays with the desktop unless the spec covers
 it, and a `FollowPointer` layer takes the keyboard on a click and hands it back
 when the pointer leaves.
 
-An input method composes through IMM32, with the engine's preedit and
-commit events and the IME windows at the caret. A screen capture runs a Windows
+A focused field's input method composes through TSF, which also carries the field's
+surrounding text and a request to delete it; every other state composes through
+IMM32, with the engine's preedit and commit events and the IME windows at the
+caret. A screen capture runs a Windows
 Graphics Capture session over one output, or duplicates it through Desktop
 Duplication, and an advanced-colour desktop arrives as the half-float scRGB
 surface it composes, unconverted, with the display's peak beside it; an 8-bit
@@ -1068,11 +1114,12 @@ ending.
 
 Not implemented: on the Windows window, a paste that carries more than text
 into an editor (the event carries a string, though the process can read a file
-list or a picture), the input method's surrounding text and `DeleteSurrounding`
-— TSF's `ITextStoreACP`, which replaces the IMM32 path rather than sitting
-beside it and needs an IME to verify — redraw during a modal resize drag, and
-`ExclusiveZone::Reserve`; in a capture, a frame larger than one output assembled
-into one picture, and the GDI rung's colours, which are 8-bit by nature; Vulkan.
+list or a picture), redraw during a modal resize drag, and
+`ExclusiveZone::Reserve`; in TSF, an observed live composition, because this
+machine's input method does not start in any application, so the preedit and
+delete-surrounding paths are pinned by unit tests only; in a capture, a frame
+larger than one output assembled into one picture, and the GDI rung's colours,
+which are 8-bit by nature; Vulkan.
 The Windows and Vulkan notes in `old/` are surveys, not code.
 
 ## See also
