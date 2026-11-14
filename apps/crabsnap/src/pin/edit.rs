@@ -404,12 +404,17 @@ impl Session {
             && let Some(mark) = document.get(edit.id).cloned()
             && let MarkKind::Text(text) = &mark.kind
         {
+            let composing = self.composing(cx, node, document);
+            let shown = composing.as_ref().map_or(text, |composing| &composing.shown);
             chrome = chrome.child_decl(text_field(
                 cx,
                 node,
                 space,
                 drawn,
-                text,
+                FieldText {
+                    committed: text,
+                    shown,
+                },
                 mark.style.ink,
                 catalog,
             ));
@@ -1573,6 +1578,9 @@ impl Session {
         let mut text = self.text_style.clone();
         text.at = at;
         text.text.clear();
+        // The template dresses a new mark; a pulled-out width belongs to the mark it was
+        // dragged on, and carrying it here would wrap a fresh mark at a stale width.
+        text.width = None;
         let id = document.insert_preview(Mark {
             kind: MarkKind::Text(text),
             style: self.style.clone(),
@@ -1606,17 +1614,32 @@ impl Session {
     /// The composition an open text field is showing, if any.
     ///
     /// The bytes live in the engine, not the document: the mark keeps only what the input
-    /// method committed, so a cancelled composition leaves no edit behind.
-    pub(crate) fn composing(&self, cx: &Cx<'_>, node: Id) -> Option<Composing> {
+    /// method committed, so a cancelled composition leaves no edit behind. The mark that
+    /// comes back has the preedit spliced in and measured, so its frame is the box the
+    /// commit will produce and the canvas and the field measure one paragraph.
+    pub(crate) fn composing(
+        &self,
+        cx: &Cx<'_>,
+        node: Id,
+        document: &Document,
+    ) -> Option<Composing> {
         let edit = self.text.as_ref()?;
         let field = text_field_id(node);
         let preedit = cx
             .preedit_for(field)
             .filter(|preedit| !preedit.is_empty())?;
+        let caret = cx.caret_for(field)?;
+        let MarkKind::Text(mark) = &document.get(edit.id)?.kind else {
+            return None;
+        };
+        let (mut shown, at) = mark.composed_with(caret, &preedit);
+        shown.measure(cx);
         Some(Composing {
             id: edit.id,
-            caret: cx.caret_for(field)?,
+            caret,
             preedit,
+            shown,
+            at,
         })
     }
 
@@ -1883,6 +1906,15 @@ fn text_of(document: &Document, id: MarkId) -> Option<TextMark> {
     }
 }
 
+/// The buffer a field edits and the paragraph it draws; they differ while a composition
+/// is in flight.
+struct FieldText<'a> {
+    /// What the engine edits and commits.
+    committed: &'a TextMark,
+    /// The same mark showing the composition, whose frame the box and the text use.
+    shown: &'a TextMark,
+}
+
 /// The field over a text mark: the mark's own box, given the caret and nothing else. The
 /// canvas paints the frame and the paragraph — the same primitives the exported picture
 /// rasterizes — so typing cannot drift from what will be saved. Only the caret and the
@@ -1892,28 +1924,27 @@ fn text_field(
     node: Id,
     space: Space,
     drawn: Rect,
-    mark: &TextMark,
+    text: FieldText<'_>,
     ink: Color,
     catalog: &Catalog,
 ) -> ui_core::Decl {
+    let mark = text.shown;
+    let committed = text.committed.text.as_str();
     let (sx, sy) = space.scale();
     let frame = mark.frame();
     let at = space.to_surface(frame.origin);
     let field = text_field_id(node);
     let size = (mark.size * sy).max(6.0);
     let padding = Point::new(mark.padding * sx, mark.padding * sy);
-    // A hugged frame has no wrap width of its own; the measured lines were laid out
-    // unbroken, so the caret has to be placed against the same freedom.
-    let width = match mark.width {
-        Some(_) => (frame.size.w * sx - 2.0 * padding.x).max(1.0),
-        None => f32::INFINITY,
-    };
-    let caret = cx.caret_for(field).unwrap_or(mark.text.len());
+    // The field wraps where the canvas's primitive does, including a composition: its box
+    // is the measured mark's, so the caret stays on the line the glyphs are on.
+    let width = mark.wrap() * sx;
+    let caret = cx.caret_for(field).unwrap_or(committed.len());
     let preedit = cx.preedit_for(field);
     // The composition draws where its commit would land, and the caret after it; the
     // canvas beneath draws the same splice, so the two cannot part company.
     let (shown, composing, caret_at) =
-        ui_widgets::text::typed_input(&mark.text, Some(caret), preedit.as_ref());
+        ui_widgets::text::typed_input(committed, Some(caret), preedit.as_ref());
     let selection = cx
         .selection_for(field)
         .filter(|selection| !selection.is_collapsed())
@@ -1927,6 +1958,12 @@ fn text_field(
         .align(mark.align)
         .composing(composing)
         .painting(selection);
+    // A hugged mark has no break of its own, and its box is only as wide as the paragraph:
+    // laid out against that box, a line rounding a hair wider would fold and take the caret
+    // with it. The field draws one line, as the canvas primitive does.
+    if mark.width.is_none() {
+        text = text.nowrap();
+    }
     if let Some(at) = caret_at {
         text = text.caret(at, ink);
     }
@@ -1947,7 +1984,7 @@ fn text_field(
         // keyboard stop, or no focus request would ever land on it.
         .focus_stop(true)
         .cursor(CursorShape::Text)
-        .text_input(mark.text.clone())
+        .text_input(committed.to_owned())
         .text_input_multiline(true)
         .menu(rows)
         .offset(at.x - drawn.origin.x, at.y - drawn.origin.y)

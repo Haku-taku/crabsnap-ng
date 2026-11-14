@@ -377,7 +377,7 @@ impl PinContent for Bitmap {
         let composing = self
             .edit
             .as_ref()
-            .and_then(|session| session.composing(cx, frame.id));
+            .and_then(|session| session.composing(cx, frame.id, &self.document));
         if !self.document.is_empty() {
             cx.canvas(Canvas {
                 id: CanvasId(frame.texture),

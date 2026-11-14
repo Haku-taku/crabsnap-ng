@@ -20,13 +20,28 @@ pub use text::TextMark;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MarkId(u64);
 
-/// The bytes an input method is composing over one text mark: drawn, not committed.
+/// An input method's composition over one text mark: the bytes, where they sit, and the mark
+/// as their commit will leave it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Composing {
     pub id: MarkId,
     /// Where the composition starts, in bytes of the mark's committed text.
     pub caret: usize,
     pub preedit: ui_core::Preedit,
+    /// The mark with the composition spliced in and measured.
+    ///
+    /// Its frame is the box the commit will produce, so the canvas and the field draw a
+    /// composition inside the box it is about to fill instead of one measured before it.
+    pub shown: TextMark,
+    /// Where the preedit starts in [`Self::shown`]'s text.
+    pub at: usize,
+}
+
+impl Composing {
+    /// The bytes of [`Self::shown`]'s text the input method's underline covers.
+    pub fn range(&self) -> std::ops::Range<usize> {
+        self.at..self.at + self.preedit.text.len()
+    }
 }
 
 /// How a mark is painted, in image pixels.
@@ -483,8 +498,9 @@ impl Document {
 
     /// The same, with an input method's unfinished bytes shown over one mark.
     ///
-    /// A preedit is not part of the document: it is drawn where its commit would land, and
-    /// an export never sees it because that path calls [`Document::draw`].
+    /// A preedit is not part of the document: `composing` carries the mark its commit will
+    /// leave, which is drawn in its place. An export never sees it because that path calls
+    /// [`Document::draw`].
     pub fn draw_composing(&self, list: &mut DrawList, composing: Option<&Composing>) {
         let owner = DrawList::canvas_owner();
         for (id, mark) in &self.marks {
@@ -625,10 +641,14 @@ fn draw_mark(
             }
         }
         MarkKind::Bezier(path) => path.paint(list, owner, id, revision, style),
-        MarkKind::Text(text) => {
-            let composing = composing.map(|composing| (composing.caret, &composing.preedit));
-            text.paint(list, owner, style, composing);
-        }
+        MarkKind::Text(text) => match composing {
+            Some(composing) => {
+                composing
+                    .shown
+                    .paint(list, owner, style, Some(composing.range()))
+            }
+            None => text.paint(list, owner, style, None),
+        },
     }
 }
 
@@ -884,23 +904,35 @@ mod tests {
     }
 
     /// An input method's unfinished bytes join the paragraph where their commit would land,
-    /// and the list an export paints stays the committed text.
+    /// the frame they draw in is the one their commit will leave, and the list an export
+    /// paints stays the committed text.
     #[test]
     fn a_composition_paints_where_its_commit_would_land() {
         let mut document = Document::new();
         let mut text = TextMark::new(Point::ZERO);
         text.text = "abc".to_owned();
         let edit = document.insert_edit(Mark {
-            kind: MarkKind::Text(text),
+            kind: MarkKind::Text(text.clone()),
             style: Style::default(),
         });
         let id = edit.id;
         document.commit(edit);
 
+        let preedit = ui_core::Preedit::new("xy", 1);
+        let (shown, at) = text.composed_with(1, &preedit);
+        assert_eq!(shown.text, "axybc");
+        assert_eq!(at, 1);
+        assert_eq!(
+            shown.wrap(),
+            f32::INFINITY,
+            "a hugged frame offers a composition the same unbroken line as its text"
+        );
         let composing = Composing {
             id,
             caret: 1,
-            preedit: ui_core::Preedit::new("xy", 1),
+            preedit,
+            shown,
+            at,
         };
         let mut shown = DrawList::new(Rect::new(0.0, 0.0, 64.0, 64.0));
         document.draw_composing(&mut shown, Some(&composing));

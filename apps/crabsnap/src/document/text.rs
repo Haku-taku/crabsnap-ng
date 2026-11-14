@@ -159,6 +159,22 @@ impl TextMark {
         }
     }
 
+    /// This mark with `preedit` spliced at `caret`: the paragraph its commit will leave,
+    /// and where the preedit starts in it.
+    ///
+    /// The copy has not been measured. Whoever draws it measures it first, so the frame on
+    /// screen is the box the committed text will produce rather than the one measured
+    /// before the composition existed.
+    pub fn composed_with(&self, caret: usize, preedit: &ui_core::Preedit) -> (TextMark, usize) {
+        let (text, at) = ui_core::text_input::composed(&self.text, &preedit.text, caret);
+        let shown = TextMark {
+            text,
+            measured: None,
+            ..self.clone()
+        };
+        (shown, at)
+    }
+
     /// Shape the text again if its inputs moved, and answer whether the frame changed size.
     ///
     /// A headless build has no measurer; the estimate the mark already carries then stands,
@@ -245,14 +261,14 @@ impl TextMark {
 
     /// Draw the frame and its text into `list`, in image pixels.
     ///
-    /// `composing` is the caret and the input method's unfinished bytes: they join the
-    /// paragraph where their commit would land, and the engine underlines them.
+    /// `composing` is the range an input method's bytes cover in this mark's text — the mark
+    /// already carries them — and the engine underlines it.
     pub fn paint(
         &self,
         list: &mut DrawList,
         owner: NodeId,
         style: &Style,
-        composing: Option<(usize, &ui_core::Preedit)>,
+        composing: Option<std::ops::Range<usize>>,
     ) {
         let frame = self.frame();
         if self.background.is_some() || self.border.is_some() {
@@ -269,17 +285,10 @@ impl TextMark {
                 },
             );
         }
-        let (shown, composed) = match composing {
-            Some((caret, preedit)) if !preedit.is_empty() => {
-                let (shown, at) = ui_core::text_input::composed(&self.text, &preedit.text, caret);
-                (shown, Some(at..at + preedit.text.len()))
-            }
-            _ => (self.text.clone(), None),
-        };
         list.push_text(
             owner,
             TextPrim {
-                block: Rc::new(self.block_of(shown)),
+                block: Rc::new(self.block()),
                 origin: Point::new(
                     frame.origin.x + self.padding,
                     frame.origin.y + self.padding,
@@ -290,7 +299,7 @@ impl TextMark {
                 ink: style.ink,
                 caret: None,
                 selection: None,
-                composing: composed,
+                composing,
                 shape_scale: 1.0,
                 zoom: None,
             },

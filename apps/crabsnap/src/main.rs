@@ -2065,7 +2065,7 @@ impl App for Overlay {
         // the frame is painted once, so a selection's inside and outside are the same
         // picture. A frame with no marks declares no canvas at all.
         let picture = (self.image.width, self.image.height);
-        let composing = self.annotate.composing(cx, root);
+        let composing = self.annotate.composing(cx, root, &self.document);
         if !self.document.is_empty() {
             cx.canvas(Canvas {
                 id: CanvasId(MARKS_TEXTURE),
@@ -3118,6 +3118,59 @@ mod tests {
             view.bind_shortcut(chord, id);
         }
         view
+    }
+
+    /// A composition grows the mark it is typed into instead of wrapping inside the box
+    /// measured before it existed: the caret stays on the line, and so does the candidate
+    /// list the platform places from it.
+    #[test]
+    fn a_composition_keeps_the_caret_on_its_line() {
+        let screen = (1280, 720);
+        let at = Point::new(500.0, 300.0);
+        let mut view = settled_overlay();
+        view.build_with_dt(screen, Some(at), FRAME);
+        let app = view.app_mut();
+        assert!(app.annotate.change(
+            toolbar::Mark::Text.id(),
+            ui_core::change::Change::Activated,
+            &mut app.document,
+        ));
+        view.build_with_dt(screen, Some(at), FRAME);
+        let primary = ui_core::PointerButton::Primary;
+        view.dispatch(ui_core::Event::PointerPressed {
+            pos: at,
+            button: primary,
+        });
+        view.build_with_dt(screen, Some(at), FRAME);
+        view.dispatch(ui_core::Event::PointerReleased {
+            pos: at,
+            button: primary,
+        });
+        view.build_with_dt(screen, Some(at), FRAME);
+
+        let mut line = None;
+        let mut last = 0.0;
+        for text in ["ni", "nih", "niha", "nihao"] {
+            view.dispatch(ui_core::Event::Preedit(Some(ui_core::Preedit::new(
+                text,
+                text.len(),
+            ))));
+            view.build_with_dt(screen, Some(at), FRAME);
+            let caret = view
+                .ime_state()
+                .cursor
+                .unwrap_or_else(|| panic!("the composition at {text} must place a caret"));
+            assert_eq!(
+                *line.get_or_insert(caret.origin.y),
+                caret.origin.y,
+                "the composition {text:?} wrapped the caret onto a second line"
+            );
+            assert!(
+                caret.origin.x > last,
+                "the composition {text:?} must advance the caret along the line"
+            );
+            last = caret.origin.x;
+        }
     }
 
     /// Clearing is the selection's own command: the chord from the file drops the rectangle
