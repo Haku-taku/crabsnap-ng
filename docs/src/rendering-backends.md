@@ -315,22 +315,30 @@ through the read side, and `a_copied_path_becomes_a_file_uri` in
 in `apps/crabsnap-core/src/uri_list.rs` for the path shapes the URI list is read back into.
 
 Input methods take one of two paths. A focused field that is not secret is a TSF
-document: the window hands TSF an `ITextStoreACP` holding the field's surrounding
-text. Every other state, no field or a secret one, is IMM32. TSF is the only
-Windows path that carries the surrounding text: the store publishes
+document when the active input method is a service this process can host: the window
+hands TSF an `ITextStoreACP` holding the field's surrounding text. Every other state —
+no field, a secret one, or a service that runs out of process — is IMM32. The split is not a
+preference: an input method registered as a `LocalServer32` service answers keys only
+through the window's IMM32 emulation, and associating a TSF document with the window
+switches that emulation off, so the service then takes no key and composes nothing.
+The backend asks the registry which kind the active profile is (`tsf::serves_input`)
+before the first attach and keeps IMM32 when the answer is out of process.
+
+TSF is the only Windows path that carries the surrounding text: the store publishes
 `ImeState::surrounding` as the document, holds the input method's composition as a
 splice at the caret, and maps the composition to `Event::Preedit` and its commit to
 `Event::Text`. An edit that removes text beside the caret becomes
 `Event::DeleteSurrounding`, with the counts in the engine's UTF-8 bytes although the
 store indexes by UTF-16 code units. The document is created and associated with the
-window the first time a field asks for it, and if TSF refuses to start the window
-keeps IMM32 for the rest of its life. While the document is attached it owns the
-keyboard: each key is offered through `ITfKeystrokeMgr::TestKeyDown`/`KeyDown`,
-`WM_IME_*` is left unanswered, and the `WM_CHAR` that `TranslateMessage` still makes
-from a key an input method took is dropped rather than typed a second time. The store
-reports its layout (`OnLayoutChange`) whenever its text or caret moved, because an
-input method composes only where it has a rectangle for its candidate window; a frame
-that changed neither says nothing.
+window the first time a field asks for it, and if TSF refuses to start, or the input
+method cannot be served, the window keeps IMM32 for the rest of its life. While the
+document is attached it owns the keyboard: each key is offered through
+`ITfKeystrokeMgr::TestKeyDown`/`KeyDown`, `WM_IME_*` is left unanswered, and the
+`WM_CHAR` that `TranslateMessage` still makes from a key an input method took is
+dropped rather than typed a second time. The store reports its layout
+(`OnLayoutChange`) whenever its text or caret moved, because an input method composes
+only where it has a rectangle for its candidate window; a frame that changed neither
+says nothing.
 
 The IMM32 path carries the rest. A frame's `ImeState` opens or closes the input
 context and puts the composition window at the caret, with the candidate list told
@@ -348,15 +356,22 @@ with the candidate form excluding the caret's rectangle, and an injected `a😀b
 composition arrived as a preedit of 6 bytes with the caret at its end, which is
 what an injected composition reports.
 
-Measured with `cargo run -p ui-platform-win32 --example tsf_probe`: a field whose
-text was `hello world` with the caret at 5 gave TSF a focused document, an edit
-session run under the store's lock read `hello world` back out of it with the caret
-at 5, a posted `a` still arrived as `Event::Text`, and once the field went away the
-document left the thread's focus and a posted space reached the engine as a key.
-Live composition is what this machine cannot show: it registers Microsoft Pinyin
-only as an out-of-process text service, which no application on it starts — Notepad
-composes nothing either — so a preedit and a live delete-surrounding were never
-observed here. Their derivation is what the tests in
+Measured with `cargo run -p ui-platform-win32 --example tsf_probe`: on this machine
+the probe reports `the input method can be served through TSF  no (out of process,
+so the window keeps IMM32)` and skips the document checks. What it still checks
+passes: a posted `a` arrives as `Event::Text`, and a posted space reaches the engine
+as a key once the field is gone.
+
+The store's contract was measured before the gate existed, on the same machine: a
+field whose text was `hello world` with the caret at 5 gave TSF a focused document,
+and an edit session run under the store's lock read `hello world` back out of it
+with the caret at 5. Live composition into that store was never observed here — the
+input method this machine ships is out of process, so no window may use TSF for it;
+when it was still associated, every key came back from
+`ITfKeystrokeMgr::TestKeyDown` as not taken, the context's open/close and conversion
+compartments stayed empty, `GetText` was never called, and the typed letters reached
+the engine as plain text. Composition through IMM32 is measured by the `ime` example
+above. The store's derivation is what the tests in
 `crates/ui-platform-win32/src/tsf.rs` pin:
 `a_composition_is_one_preedit_and_its_end_one_commit`,
 `a_removal_before_the_caret_asks_the_engine_for_surrounding_text`,
@@ -1013,9 +1028,13 @@ supersampling factor is re-applied, and the glyph atlases and registered images 
 because a fresh presenter and renderer start with empty caches. A failure with a healthy device
 is still reported unchanged rather than retried. `WM_DISPLAYCHANGE` asks for the same rebuild,
 because a chain's format and colour space are decided when it is created and the output under
-the window may now present HDR where it did not, or the reverse. The removal path is
-`[unverified]` against a real removal, which needs the adapter disabled while a pin is on
-screen; if the trigger misses, the failure reaches the loop, which retires just that surface.
+the window may now present HDR where it did not, or the reverse. The removal path was
+observed once, on the report that a graphics driver update ran while the daemon and its
+windows were on screen and the program kept working: the process survived the removal a
+driver update causes and kept drawing afterwards. What that observation does not say is
+which trigger answered — the device-removed reason or a `WM_DISPLAYCHANGE` — or how many
+rebuilds ran, since nothing counted them; if both miss, the failure reaches the loop, which
+retires just that surface.
 The rebuild itself was exercised by posting `WM_DISPLAYCHANGE` twice at a live settings window:
 each rebuild re-made the chain and the window kept painting, which is what proves the old chain
 leaves the window before the new one attaches — a second flip chain on one window is refused.
@@ -1080,8 +1099,26 @@ which is why the store now implements the sink rather than an advisor beside it.
 `ITextStoreACP::GetText` must read `acpEnd == -1` as "to the end of the document": TSF reads
 the whole document that way, and the probe's edit session, which widens the range to the
 document's end before reading, came back empty until the store honoured it. That last one is
-what the probe pins today; the two refusals are what they were at the call, since this
-machine's input method never starts and so never notifies the sink.
+what the probe pins today; the two refusals are what they were at the call, since the input
+method this machine has never notifies the sink — it runs out of process, and no window here
+associates a document with it at all.
+
+**TSF took the keyboard away from the input method that worked.** The first cut gave a
+focused field's window a TSF document whenever the field was enabled and not secret. On
+this machine the gallery then showed no preedit at all and could not switch input methods:
+Microsoft Pinyin registers only as a `LocalServer32` service, and it serves keys through
+the window's IMM32 emulation — `ITfThreadMgr::AssociateFocus` switches that emulation off,
+so the service received nothing. Measured with a probe that typed `nihao` into a real
+window: the service reported itself active (`ITfActiveLanguageProfileNotifySink`),
+`ITfKeystrokeMgr::TestKeyDown` answered `S_OK` with *not taken* for every key, the
+document's open/close and conversion compartments stayed `VT_EMPTY`, `GetText` was never
+called, and the letters arrived as plain `Event::Text`. The same probe with
+`AssociateFocus` skipped, and the window refocused, composed `nihao` through
+`WM_IME_COMPOSITION`. The fix is the rule above it: `tsf::serves_input` reads the active
+keyboard profile and uses TSF only when its CLSID has an `InprocServer32` entry, so a
+window never swaps a working input method for one that cannot serve it. `tsf_probe` now
+reports which path the machine takes and skips its document checks on the out-of-process
+one; `ime` pins that the IMM32 path still opens, places and reads a composition.
 
 **A sizing drag froze the window it was resizing.** `WM_NCLBUTTONDOWN` went to
 `DefWindowProcW`, which runs the sizing loop on this thread: the process loop stopped
@@ -1120,10 +1157,10 @@ auto-hidden taskbar hides behind stays with the desktop unless the spec covers
 it, and a `FollowPointer` layer takes the keyboard on a click and hands it back
 when the pointer leaves.
 
-A focused field's input method composes through TSF, which also carries the field's
-surrounding text and a request to delete it; every other state composes through
-IMM32, with the engine's preedit and commit events and the IME windows at the
-caret. A screen capture runs a Windows
+A focused field's input method composes through TSF when the active text service is
+in process, which also carries the field's surrounding text and a request to delete
+it; an out-of-process service, and every other state, composes through IMM32, with
+the engine's preedit and commit events and the IME windows at the caret. A screen capture runs a Windows
 Graphics Capture session over one output, or duplicates it through Desktop
 Duplication, and an advanced-colour desktop arrives as the half-float scRGB
 surface it composes, unconverted, with the display's peak beside it; an 8-bit
@@ -1136,9 +1173,10 @@ Not implemented: on the Windows window, a paste that carries more than text
 into an editor (the event carries a string, though the process can read a file
 list or a picture), drawing while a window is moved by its title bar (that drag
 is still the shell's modal loop), and `ExclusiveZone::Reserve`; in TSF, an
-observed live composition, because this machine's input method does not start in
-any application, so the preedit and delete-surrounding paths are pinned by unit
-tests only; in a capture, a frame larger than one output assembled into one
+observed live composition, because the only input method this machine has runs out
+of process and no window here may use TSF for it, so the store's preedit and
+delete-surrounding paths are pinned by unit tests and its document by a probe run
+before the gate existed; in a capture, a frame larger than one output assembled into one
 picture, and the GDI rung's colours, which are 8-bit by nature; Vulkan. The
 Windows and Vulkan notes in `old/` are surveys, not code.
 
