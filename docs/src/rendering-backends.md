@@ -83,15 +83,18 @@ compare against the GL backend; that needs a Linux run.
 ### The Windows window
 
 `ui-platform-win32` is the D3D11 device's window: `CreateWindowExW` under
-per-monitor DPI awareness, an `IDXGISwapChain1` from `CreateSwapChainForHwnd`
-(`B8G8R8A8_UNORM`, two buffers, `DXGI_SWAP_EFFECT_FLIP_DISCARD`), and
-`Present(1, 0)` for vsync pacing on the surface's render thread. The synchronous
-`Win32Presenter` still implements `SceneTarget` for a caller that draws on its
-own thread, so such a caller drives it exactly as it drives the Wayland GPU
-window; the app loop's session hands frames to the render thread instead. The
-opening size in a
-`SurfaceSpec` is logical and becomes a physical client area through
-`AdjustWindowRectExForDpi`.
+per-monitor DPI awareness with `WS_EX_NOREDIRECTIONBITMAP`, an `IDXGISwapChain1`
+from `CreateSwapChainForComposition` (`B8G8R8A8_UNORM`, two buffers,
+`DXGI_SWAP_EFFECT_FLIP_DISCARD`) shown through an `IDCompositionVisual` rooted in
+the window. A windowed chain names its HWND, which makes DXGI answer that window's
+size messages and resize its front buffer from the thread that owns the window; a
+composition chain names no window, so the only thread it lives on is the one that
+presents it. A layer declares `DXGI_ALPHA_MODE_PREMULTIPLIED` and shows its
+frame's alpha; a decorated window declares `DXGI_ALPHA_MODE_IGNORE` and is opaque.
+The synchronous `Win32Presenter` still implements `SceneTarget` for a caller that
+draws on its own thread; the app loop's session hands frames to the GPU thread
+instead. The opening size in a `SurfaceSpec` is logical and becomes a physical
+client area through `AdjustWindowRectExForDpi`.
 
 The painter never draws into the back buffer. `ui-gpu-scene` keeps a frame
 target of its own and, at the end of a frame, blits only the damage band into
@@ -121,21 +124,22 @@ probes passed at both extents. `WINDOW_DUMP=path` writes the frame as a PPM.
 
 The window is also the driver's `FrameHost`, so the engine decides when to turn
 and no app pumps messages itself. A Win32 window has no frame callback. The frame
-is presented by the surface's render thread, which owns the device, the chain
-and `Present`; `Present(1)` there returns at the compositor's next blank, so the
-thread paces itself and the loop's next frame is built while the previous one is
-on screen. When the thread finishes a frame — presented, refused, or given up on
-after a rebuild — it sets the surface's frame event, and the loop waits on that
-event beside the thread's messages with `MsgWaitForMultipleObjectsEx`. That wait
-is the pacing point a `wl_surface` frame callback marks, and because it also ends
-on input, a border drag or a title-bar drag is dispatched while a frame is on the
-GPU instead of behind it. `can_draw` reports the event: true at the first frame
-and after the thread finishes one, false while a frame is in flight. The chain
-keeps `SetMaximumFrameLatency(1)` so at most one frame is queued; in `uncapped`
-mode the thread presents with `Present(0)` and the loop blocks in the hand-over
-itself, the pacing the old synchronous present had. A chain that refuses
-`DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT` is still built — the event,
-not the chain's own waitable object, is what the window waits on.
+is presented by one GPU thread for the process, which owns every surface's device,
+chain and `Present`. Each chain carries a frame-latency event
+(`DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT` with
+`SetMaximumFrameLatency(1)`); the thread waits on all of them in one
+`WaitForMultipleObjects` and presents whichever chain says it can take a frame,
+with no swap interval, so no window's blank is paid by another window. When it
+finishes a frame — presented, refused, or given up on after a rebuild — it sets
+that surface's frame event, and the loop waits on that event beside the thread's
+messages with `MsgWaitForMultipleObjectsEx`. That wait is the pacing point a
+`wl_surface` frame callback marks, and because it also ends on input, a border
+drag or a title-bar drag is dispatched while a frame is on the GPU instead of
+behind it. `can_draw` reports the event: true at the first frame and after the
+thread finishes one, false while a frame is in flight. In `uncapped` mode the
+thread does not wait for the chain's event at all. A chain the driver gives no
+event is presented on a 4 ms tick instead — the case is rare, and the surface it
+belongs to is the only one that pays.
 
 Input leaves the window procedure as `ui_core::Event`: cursor motion plus a
 `TrackMouseEvent`-armed leave, the three buttons with `SetCapture` as the
@@ -1322,6 +1326,36 @@ the stack. The physical gesture itself could not be driven from this session —
 is accepted and has no effect on this desktop — so that the other window visibly keeps
 animating under a real drag is `[unverified]` here; the loop-level branch is what was
 tested.
+
+**Two render threads corrupted the GPU stack.** With one render thread per surface,
+`two_windows` on this machine (Windows 11, 275 Hz output) crashed in every run — six of six,
+4 s to 48 s in — on the render thread, with the faulting instruction pointer on that
+thread's own stack or at `-1` and the same register values in every report. A single-window
+build ran six of six 25 s runs clean. `MakeWindowAssociation(hwnd, DXGI_MWA_NO_WINDOW_CHANGES)`
+did not help: the same crash followed. Moving every window, not only a layer, onto
+`CreateSwapChainForComposition` and DirectComposition did not help either — which is what
+rules out the HWND chain itself and leaves the process-wide state behind DXGI, D3D11 and
+DirectComposition as the thing two thread stacks were driving at once.
+
+The chains now belong to one GPU thread for the process, the structure every compositor
+uses: one process-wide device stack, every surface's chain, every frame packet. Pacing is
+what made this worth doing rather than serializing `Present` behind a lock: a lock held
+across `Present` makes one window's blank block another, which is worse than the build it
+replaces (a first attempt at exactly that was visibly janky). Each chain's frame-latency
+event avoids it — the thread waits on all of them at once and presents whichever is ready,
+with no swap interval — so a window that is not ready costs the others nothing. Six static
+runs of 45 s and two more runs of 60 s crashed none and kept both windows animating; 45 s of
+two windows produced 220,000–360,000 frames. The drag path is `[unverified]` in this
+session: a helper's press, 200 px sweep and release from `mouse_event` left the window
+rectangle at 288,288 — the shell's move loop never engaged — so what the soaks cover is the
+stationary case, and a hand drag is still owed.
+
+What the composition chain gives up is DWM-side pacing: with `Present(0)` and the waitable,
+the chain's event was set again within microseconds of each `Present` here, so the thread ran
+at thousands of frames per second per window instead of the output's 275 Hz. That is the
+same overdraw the earlier `Present(0)` build had, not a regression from this change; a
+frame-rate pass should throttle each surface against its output's refresh rather than
+reintroduce a blocking present.
 
 ## Status
 

@@ -49,9 +49,9 @@ would clear either may never come.
   sets the scale, hands back the pointer, and lets the app build.
 
 `Driver::pace` waits for the next frame window after presenting — a Wayland frame
-callback, or on Windows the render thread's finished-frame event — so the next
-turn lands in a new window. `uncapped` is a switch on the driver, not a branch in
-the app.
+callback, or on Windows the GPU thread's finished-frame event — so the next turn
+lands in a new window. `uncapped` is a switch on the driver, not a branch in the
+app.
 
 > **Wrong path:** letting an application decide "this frame does not need
 > presenting". That is a second copy of the rule above, and the first one to
@@ -83,7 +83,7 @@ The Win32 session has the same loop with the GPU half moved off it:
 
 ```rust
 pub struct Session<A: App> {
-    render: RenderThread,   // device, chain, Present; joined in `Drop`
+    render: RenderThread,   // this surface's handle on the process GPU thread
     driver: Driver,
     lp: AppLoop<A>,
     win: Win32Window,
@@ -93,8 +93,13 @@ pub struct Session<A: App> {
 ```
 
 `present` builds the frame on the loop's thread and hands the owned packet to
-`render`; `pace` waits on that thread's event, which is why the field order
-still has to run the render thread down before the window goes.
+`render`; `pace` waits on the event the GPU thread sets for this surface, which
+is why the field order still has to give the chain back before the window goes.
+The GPU thread is the process's, not the surface's: it owns every surface's
+device and chain, and presents each chain when that chain's frame-latency event
+says it can take a frame, so a window that is not ready costs the others
+nothing. A surface's `RenderThread` is a handle on that thread, not a thread of
+its own.
 
 `split()` exists for hosts that genuinely need cross-layer access (clipboard
 routing, scripted input). It is not a general escape hatch.
@@ -127,6 +132,14 @@ could still owe a commit for IME state. `commit_pending()` is the fourth term,
 and removing it turns
 `a_scene_frame_presents_only_when_it_has_something_to_carry` red.
 
+**A render thread per surface raced the GPU's process-wide state.** Two chains
+presented from two thread stacks crashed in every two-window run with the faulting
+instruction pointer on a stack; one window never did. DXGI, D3D11 and
+DirectComposition each keep state behind their objects, and one thread owns every
+chain now. See the correction entry in
+[Rendering Backends](../rendering-backends.md) for the measurements and for the
+wait that keeps one window's blank off another's thread.
+
 ## Traps
 
 | Change | Symptom |
@@ -136,6 +149,7 @@ and removing it turns
 | Call `set_cursor`/`set_ime` from the app | The engine's state and the backend's disagree |
 | Reorder `Session` fields | Teardown touches the surface after the objects that depend on it |
 | Present with an empty damage list every frame | Wasted commits; the compositor never settles |
+| Give each surface its own render thread | Two device stacks race in one process; the crash lands anywhere |
 
 ## See also
 
