@@ -237,10 +237,12 @@ the rectangle back, and the release ends it. The app loop therefore keeps
 running through the drag, and every move is followed by a frame built for the
 new size. `DefWindowProcW`'s sizing loop would instead block this thread until
 the button came up, which is why the last frame used to be stretched across the
-growing window by DWM. A title-bar drag, `SC_SIZE` from the system menu, and
-Alt+Space still use that loop, so nothing else in the process draws while a
-window is being moved, and a resize that this window performs loses the edge
-snapping the shell's own loop gives a dragged border.
+growing window by DWM. A title-bar press is deferred to the host loop, which
+starts the system's move with a frame pump armed: the shell still moves and
+snaps the window, and the process keeps drawing inside its loop. `SC_SIZE` from
+the system menu and Alt+Space still use that loop without a pump, so those
+still block. A resize that this window performs loses the edge snapping the
+shell's own loop gives a dragged border.
 
 A window that declares a minimum has that floor on both routes: `WM_GETMINMAXINFO`
 answers `tracked_minimum`, which converts the spec's logical client area into a
@@ -1135,7 +1137,7 @@ screen position and the window's rectangle, a mouse move resizes through `SetWin
 Escape restores the rectangle, and the release or a lost capture ends it, so the loop
 runs between messages and a frame follows each move. What that gives up is in the
 sizing paragraph above: the shell's loop is where a dragged edge snaps to a monitor
-edge, and a title-bar drag still blocks the process. `resize_probe` drags the border
+edge. `resize_probe` drags the border
 with posted messages and reads the presented frame back: a client area of 525 by 375
 pixels became 585 by 415 after a 60-by-40 move, and the frame read back was 585 by 415,
 not the old size stretched.
@@ -1210,6 +1212,21 @@ Live on Windows: a screenshot taken mid-drag shows the target's highlight and hi
 already painted, and the card's rounded corners show the panel behind the drag rather than
 the page its rectangle covered.
 
+**A title-bar drag stopped every frame in the process.** The press went to `DefWindowProcW`,
+whose move loop runs on this thread and returns only when the window is dropped; the engine
+was left showing its last frame for the whole gesture, and an animation in the client area
+stopped. The window procedure now records a caption press and returns without the default,
+and the host loop starts the move itself with `ReleaseCapture` and
+`SendMessage(WM_SYSCOMMAND, SC_MOVE + HTCAPTION)` — the same loop a title-bar drag runs, so
+dragging to a monitor edge still snaps — with the same timer pump a drag uses armed around
+it, so frames keep arriving. A press whose button was already up is dropped: the loop would
+otherwise wait for the keyboard. Only a loop that promises to service the request defers it
+(`defer_system_move`, which `Session` calls); a `Win32Window` driven directly keeps the
+default and moves without the pump rather than not moving at all. Measured with synthetic
+input on the `dnd` example: the window went from 120,120 to 264,192 while the process stayed
+responsive, a caption click with no travel returned at once, and the pump ran 66 times
+during the gesture.
+
 ## Status
 
 Implemented: both presenters, dma-buf zero-copy, explicit sync, HDR targets,
@@ -1251,8 +1268,7 @@ ending.
 
 Not implemented: on the Windows window, a paste that carries more than text
 into an editor (the event carries a string, though the process can read a file
-list or a picture), drawing while a window is moved by its title bar (that drag
-is still the shell's modal loop), and `ExclusiveZone::Reserve`; in TSF, an
+list or a picture), and `ExclusiveZone::Reserve`; in TSF, an
 observed live composition, because the only input method this machine has runs out
 of process and no window here may use TSF for it, so the store's preedit and
 delete-surrounding paths are pinned by unit tests and its document by a probe run

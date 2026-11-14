@@ -408,6 +408,9 @@ rebuilds and presents their frame, and does nothing at all when the queue is emp
 animation is running, so a still drag costs no painting. Qt reaches the same place by calling
 `processEvents` from `QueryContinueDrag`; a timer needs no OLE subclass, which also keeps the
 incoming targets' signatures untouched. Verified live: a screenshot taken mid-drag shows the
-drop panel already highlighted and its hint text painted, before the release. The title bar's
-move is still the shell's modal loop and still freezes the surface; it is kept because the
-snapping that loop provides has no replacement in this window yet.
+drop panel already highlighted and its hint text painted, before the release. The title-bar
+move gets the same pump on the Win32 window: the caption press is deferred to the host loop
+rather than started inside message dispatch, which starts the system's move — snapping
+included — with a timer armed, so an animation keeps running while the window is dragged.
+`SC_SIZE` from the system menu and the system menu itself still block, because neither
+route goes through the loop that can arm a pump.
