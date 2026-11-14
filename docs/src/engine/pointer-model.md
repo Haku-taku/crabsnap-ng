@@ -164,7 +164,7 @@ publishes to the operating system so the pointer shows it.
 
 | Platform | Incoming | Outgoing |
 | --- | --- | --- |
-| Win32 | OLE `IDropTarget` on the window thread; every clipboard format the table can decode is read back at the drop; `IDropTargetHelper` paints the source's image and drop description | `DoDragDrop` on the window thread; the payload is exported in the formats `clipboard::item_formats` knows, and the element's own pixels are captured from the screen and registered with `IDragSourceHelper` so a target can draw them under the pointer |
+| Win32 | OLE `IDropTarget` on the window thread; every clipboard format the table can decode is read back at the drop; `IDropTargetHelper` paints the source's image and drop description | `DoDragDrop` on the window thread, its modal loop pumping the surface so frames keep arriving; the payload is exported in the formats `clipboard::item_formats` knows, and the source node's own drawing is rendered off-screen and registered with `IDragSourceHelper` so a target can draw it under the pointer |
 | Wayland | `wl_data_device.enter`/`motion`/`drop`/`leave`; every announced MIME is read down its own pipe after the drop, bounded by type count, size, and a two-second timeout | `wl_data_source.start_drag` with the action the payload means, `dnd_finished`/`cancelled` as the outcome |
 
 Two losses are the protocols', not the engine's. Wayland has no link action, so a `Link`
@@ -375,3 +375,39 @@ resolution, cache dependencies, and the hover highlight, so `DragSession` holds 
 `types_decide` says when the offered types decide a target: a started gesture with no payload
 still lets any `DROP` node take it. The Wayland host adds its own reading of the same rule —
 `wl_data_device.enter` must be answered before the engine's first frame can decide.
+
+**The drag image was a crop of the screen, not of the element.** The first image was the
+source's window rectangle read back with `BitBlt`, so everything behind and beside the node
+travelled with it: a card dragged out of a panel carried the panel's background in its rounded
+corners, and a sibling painted behind it showed through. The engine now cuts the image from the
+frame's `DrawList` instead. `DrawList::owners` names the node behind every primitive, and
+`DrawList::subtree` copies the ones inside the source, in their existing clips and layers, so no
+primitive is rewritten; the UI's CPU renderer draws that list into an off-screen buffer of the
+surface's size at the surface scale, and the box those primitives actually painted is cropped
+out. The host converts the straight-alpha BGRA into the premultiplied DIB `SHDRAGIMAGE`
+requires. A node that painted nothing has no box to crop and falls back to the host's capture.
+Two things cannot survive the separation and are left out rather than approximated: a
+`Backdrop` samples the surface the drag is departing, and a `Canvas`'s picture is only filled
+on the CPU present path, so a node wrapping one shows everything but the canvas. Verified live
+with a drag whose ghost corner pixels read the panel behind the drag rather than the page the
+source sat on — the image is transparent there, while a screen crop could only be opaque — and
+pinned by `a_drag_image_is_the_element_and_never_what_sat_behind_it`, which paints a red card
+over a blue sibling and rejects blue from every pixel of the image. A text drag narrows the
+same crop to the selected lines; see
+[Text and Input](./text-and-input.md#selection-across-blocks).
+
+**DoDragDrop held the thread, so the surface stopped.** The gesture has to run on the window's
+thread ([above](#drag-and-drop)), and the loop that runs it does not return until the drop:
+the surface kept presenting the frame it had, so a drop target's highlight never appeared and
+an animation stopped dead until the button came up. OLE's loop only dispatches the thread's
+messages, so the surface can be driven from inside it. The Win32 host arms a 8 ms timer on the
+source window before `DoDragDrop` and kills it after; `WM_TIMER` calls back into the engine
+through a thread-local (the closure's lifetime is erased for the duration, and the slot is
+disarmed before the borrow ends). One tick takes the Dnd phases the drop target queued,
+rebuilds and presents their frame, and does nothing at all when the queue is empty and no
+animation is running, so a still drag costs no painting. Qt reaches the same place by calling
+`processEvents` from `QueryContinueDrag`; a timer needs no OLE subclass, which also keeps the
+incoming targets' signatures untouched. Verified live: a screenshot taken mid-drag shows the
+drop panel already highlighted and its hint text painted, before the release. The title bar's
+move is still the shell's modal loop and still freezes the surface; it is kept because the
+snapping that loop provides has no replacement in this window yet.

@@ -1178,17 +1178,37 @@ have no hits.
 registers an `IDropTarget` and answers every callback from the clipboard format table, and
 starts an outgoing drag with `DoDragDrop` on the window's own thread — a worker STA thread
 was tried first and never woke, because OLE's loop waits on mouse input only the window's
-thread receives — carrying the element's own pixels as a drag image through
-`IDragSourceHelper`, which `IDropTargetHelper` paints on the target side. The Wayland
+thread receives — carrying the source node's own drawing, rendered off-screen by the
+engine, as a drag image through `IDragSourceHelper`, which `IDropTargetHelper` paints on
+the target side; the gesture's modal loop is driven from a window timer so the surface
+keeps presenting while the pointer is held (see
+[Pointer Model](./engine/pointer-model.md#drag-and-drop)). The Wayland
 window handles `wl_data_device.enter`/`motion`/`drop`/`leave` and starts its own drags with
 `wl_data_source.start_drag`, reading the dropped payload from every announced MIME down its
 own pipe. Checked by four `ui-platform` contract tests over the engine's DnD events, the
-`ui-platform` suite (159 passed; the 11 failures are the pre-existing text-selection ones),
+`ui-platform` suite with the font feature its text tests need (174 passed; the default
+build has no font backend, so its text-selection tests cannot pass — see
+[Building](./development/building.md)),
 and a `cargo check --target x86_64-unknown-linux-gnu` for the Wayland crate. Live on Windows
 with synthetic mouse input: a card dragged onto the app's own panel arrives as `DroppedOn`
 with the text payload, the drag image of the card follows the pointer, and a card dragged
 out is taken by a terminal (which pasted the text) or ends as `Cancelled` over open ground.
 Still unrun: a file dragged in from Explorer, and every Wayland gesture.
+
+**The drag ghost was a desktop crop that also froze.** The first image was the region under
+the source read back from the screen, so whatever sat behind the node came with it, and the
+gesture ran inside `DoDragDrop` with no frames until it ended. The engine now hands over the
+node's own rendering (`DragImage`: size, straight-alpha BGRA, hotspot), and the backend
+premultiplies it into a 32-bit top-down DIB — negative `biHeight`, filled through
+`CreateDIBSection`'s bits — because that is what `SHDRAGIMAGE` requires; the screen capture
+remains only as the fallback for a node that painted nothing. Frames during the gesture come
+from `SetTimer` on the source window: `WM_TIMER` for the backend's id calls
+`dnd::pump_modal_frame`, which invokes the closure the drag began with, and the window leaves
+every other timer to its own handlers. The pump takes the Dnd phases the target queued and
+builds them a frame; with an empty queue and nothing animating it returns without painting.
+Live on Windows: a screenshot taken mid-drag shows the target's highlight and hint text
+already painted, and the card's rounded corners show the panel behind the drag rather than
+the page its rectangle covered.
 
 ## Status
 

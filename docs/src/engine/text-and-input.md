@@ -117,7 +117,18 @@ Ctrl+A means when no input holds the caret.
 
 Shift extends a selection from its anchor: a shift press (in an input or on a
 selectable block) moves the head and keeps the anchor, in another block
-included, and the drag that follows it extends from that anchor too.
+included, and the drag that follows it extends from that anchor too. From the
+keyboard, the extend chords reach a read-only selection as they reach an input:
+Shift+Left/Right and Shift+Ctrl+Left/Right move the head by one cluster or one
+word and cross into the neighbouring block at its edge, Shift+Home/End go to the
+line's bounds, and Shift+Ctrl+Home/End to the document's. A bare arrow is still
+focus navigation, because there is no caret to move.
+
+A selected range is a drag source. A press inside it arms a drag and leaves the
+range alone; travel past the threshold ends the pointer selection and hands the
+host `text/plain` — the same text Copy produces, one line per block — with the
+selected lines, cropped from the block's own rendering, as the drag image. A
+press anywhere else begins a new selection as before.
 
 ## Undo and redo
 
@@ -888,6 +899,31 @@ whole pixel of phase must produce the same tile one pixel to the right, for `o`,
 `g`. Watched red on the old pen, where `o`'s tile came out 15 px wide instead of 14. Every
 point, control points included, now goes through `ContourPen::place`.
 
+**Ctrl+A left a pointer selection armed.** The chord set the selection's ends and also the
+field a pointer selection uses to remember its anchor, so the next `PointerMoved` — even a
+hover with no button down — ran the extension path and recomputed the range from the pointer;
+select-all then looked like a drag over one paragraph. The chord now arms no pointer
+selection: it writes the ends and refreshes the derived spans.
+`ctrl_a_selects_everything_without_arming_a_pointer_drag` hovers after the chord and rejects
+any change.
+
+**A selection made right to left had no span.** `refresh_selection` ordered the two ends by the
+ranks of their blocks. Within one block the ranks are equal, so the comparison always said
+"anchor first", and a head to the left of the anchor produced `from > to`: the block was
+dropped and the range painted and copied as if it were collapsed. Ranks still order two
+different blocks; within a block the byte offsets now decide. Found by the keyboard test that
+clicks, extends left with Shift and then extends right: before the fix the second step did not
+close the range, because the internal anchor had followed the head.
+
+**A press inside the selection collapsed it instead of dragging it.** Selected text could not
+leave the block: the press that should carry it out began a new selection at the click. A press
+inside the selection now arms a drag and leaves the range as it is; travel past the threshold
+ends the pointer selection and gives the host `text/plain` with the text `copy_selection`
+produces (`selected_text`, one line per block), cropped to the selected lines. A press outside
+the range keeps the old behaviour. Caught by
+`a_press_inside_the_selection_carries_its_text_out_as_a_drag`, which compares the payload with
+`selected_text` and the image's width with the selection's rather than the block's.
+
 ## Traps
 
 | Change | Symptom |
@@ -942,7 +978,8 @@ surrounding text and a delete beside it are served there), with the
 input's content purpose and hints (a secret buffer, a time field), hidden
 fields (a byte-preserving mask, no copy or cut, no
 surrounding text), a read-only selection that crosses blocks (derived spans,
-copy one line per block, page-wide select-all), undo and redo over per-owner
+copy one line per block, page-wide select-all, Shift extension, and dragging
+the selection out as text), undo and redo over per-owner
 snapshot history (grouped by caret motion and by a one-second typing pause),
 app-requested edits through `Cx::edit_input`, app-requested focus through
 `Cx::request_focus`, reveal held where a composition started
@@ -955,7 +992,7 @@ because a secret field keeps the IMM32 path and IMM32 has no surrounding text (a
 focused non-secret field is a TSF document and serves both, when the input method
 is in process); content purposes
 beyond a secret buffer and a time field; COLR v1 paint graphs and SVG-in-OpenType colour; and typing or editing a
-read-only selection (it is selection and copy only).
+read-only selection (it is selection, copy and a drag source only).
 
 ## See also
 
