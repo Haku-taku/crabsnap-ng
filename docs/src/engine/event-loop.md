@@ -29,7 +29,7 @@ The loop lives in the portable layer; waiting and native objects do not.
 | `SurfaceHandle` | `ui-platform` (PORTABLE) | One surface as the loop sees it: a non-blocking step, its wake deadline, its closed state, a texture added after it opened |
 | `Backend` | `ui-platform` (PORTABLE trait) | Open a surface, hand over platform services, wait on platform handles |
 | `Backend` impl | `ui-platform-wayland` (PLATFORM_BOUND) | Connection, queues, poll, surfaces, clipboard, hotkeys, outputs |
-| `Backend` impl | `ui-platform-win32` (PLATFORM_BOUND) | One message pump for every window, an event as the waker, `DwmFlush`, clipboard, outputs, languages |
+| `Backend` impl | `ui-platform-win32` (PLATFORM_BOUND) | One message pump for every window, an event and each surface's frame-latency object as wakers, clipboard, outputs, languages |
 | `MessageCtx` | `ui-platform` (PORTABLE) | What a channel handler or a hotkey handler may ask of the loop: the outputs, a surface it opens, a texture on it, a frame on it |
 
 `Host` contains no protocol types, no file descriptors and no `WaylandLink`. An application

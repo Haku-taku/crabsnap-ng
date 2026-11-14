@@ -117,12 +117,18 @@ probes passed at both extents. `WINDOW_DUMP=path` writes the frame as a PPM.
 ### The Windows window as a frame host
 
 The window is also the driver's `FrameHost`, so the engine decides when to turn
-and no app pumps messages itself. A Win32 window has no frame callback:
-`wait_for_frame` calls `DwmFlush`, which returns once the composition pass that
-will show the presented frame has been submitted — the pacing point a
-`wl_surface` frame callback marks — and sleeps 8 ms instead when composition is
-off and there is nothing to flush. `can_draw` is always true, because unlike a
-Wayland surface there is no configure round trip that can withhold a buffer.
+and no app pumps messages itself. A Win32 window has no frame callback, but a
+flip-model chain hands out a frame-latency waitable object: it signals when
+another frame fits, and the window waits on it beside the thread's messages with
+`MsgWaitForMultipleObjectsEx`. That wait is the pacing point a `wl_surface`
+frame callback marks, and because it also ends on input, a border drag or a
+title-bar drag is dispatched between frames instead of behind one. `Present(0)`
+queues the frame and returns; the next draw waits for the next window. A chain
+that refuses the waitable — a driver or a composition surface that does not take
+the flag — falls back to `Present(1)` and `DwmFlush`, which is the pacing every
+build had before it, and sleeps 8 ms instead when composition is off and there
+is nothing to flush. `can_draw` reports that window: true at the first frame and
+after the compositor takes one, false while a presented frame is in flight.
 
 Input leaves the window procedure as `ui_core::Event`: cursor motion plus a
 `TrackMouseEvent`-armed leave, the three buttons with `SetCapture` as the
@@ -186,10 +192,12 @@ and an idle page settles to four to six turns a second.
 application runs on Windows through the same `Host` as on Wayland. One message
 pump serves the process: a window procedure queues the events of its own window,
 and a surface's turn takes only those, so two windows never read each other's
-input. `wait` is `MsgWaitForMultipleObjectsEx` over an auto-reset event the
-backend hands out as the `Waker`, with the loop's deadline bounded the way the
-window's own wait is. `flush` calls `DwmFlush` once per turn when a surface
-presented, which is the process's single pacing point.
+input. `wait` is `MsgWaitForMultipleObjectsEx` over two kinds of handle: an
+auto-reset event the backend hands out as the `Waker`, and every open surface's
+frame-latency object, with the loop's deadline bounded the way the window's own
+wait is. A signaled object is consumed there and makes that surface drawable
+again, so the host's one sleep is also its pacing point; `flush` only falls back
+to `DwmFlush` for a chain that has no waitable.
 
 The remaining services are answered from Win32 directly: `outputs` enumerates
 monitors and reports each in logical units with its effective DPI, refresh rate
@@ -1226,6 +1234,26 @@ default and moves without the pump rather than not moving at all. Measured with 
 input on the `dnd` example: the window went from 120,120 to 264,192 while the process stayed
 responsive, a caption click with no travel returned at once, and the pump ran 66 times
 during the gesture.
+
+**The UI thread blocked in `Present` and `DwmFlush` for every frame.** `Present(1)` waits
+for the compositor to take the frame, and the `DwmFlush` after it waits for composition —
+both on the thread that also dispatches input, so a border drag moved its edge in steps of
+up to 7 ms. The chain now carries
+`DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT` with
+`SetMaximumFrameLatency(1)`, and presents with `Present(0)`; its waitable object is shared
+by the presenter, the window and the host's wait set, so the pacing wait is a
+`MsgWaitForMultipleObjectsEx` that also returns on input, and a frame is drawn only when the
+object names a window. `Session::next_deadline` reports the driver's cap rather than "now"
+while that window is closed, or an animating host would spin through zero-length sleeps.
+Measured on the gallery's right border with a posted cursor (200 moves, 2 px every 2 ms),
+the time from posting a move to the window edge reaching it fell from 4.67 ms average /
+14.6 ms p95 to 3.66 ms / 10.1 ms; the residual is the resize itself (`device.finish` plus
+`ResizeBuffers`, about 1.2 ms on this surface) and the frame's own draw, both still on the
+UI thread. `two_windows` ran 834 frames in 759 turns over 5 s across two animating windows,
+against 408 frames in 204 turns over 3 s before the change. `resize_probe` now drives the
+blocking `tick`, because a `step` may return "waiting" while the compositor holds the last
+frame; it passed eight consecutive runs. A chain that refuses the flag keeps `Present(1)`
+and `DwmFlush`, and `flush` falls back to the latter only for such a chain.
 
 ## Status
 

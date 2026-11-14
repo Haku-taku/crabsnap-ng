@@ -48,9 +48,10 @@ would clear either may never come.
 - If not, it sleeps until `next_wake()` or the host's next event. If yes, it
   sets the scale, hands back the pointer, and lets the app build.
 
-`Driver::pace` waits for the next frame callback after presenting, so the next
-turn lands in a new frame window. `uncapped` is a switch on the driver, not a
-branch in the app.
+`Driver::pace` waits for the next frame window after presenting — a Wayland frame
+callback, or on Windows the swap chain's frame-latency object — so the next turn
+lands in a new window. `uncapped` is a switch on the driver, not a branch in the
+app.
 
 > **Wrong path:** letting an application decide "this frame does not need
 > presenting". That is a second copy of the rule above, and the first one to
