@@ -130,10 +130,10 @@ implicit grab a compositor would give, `WM_MOUSEWHEEL` and `WM_MOUSEHWHEEL` in
 notches of 48 logical units, named keys and command chords from `WM_KEYDOWN`,
 text from `WM_CHAR`, and `Modifiers` whenever `GetKeyState` disagrees with the
 last report. A numeric keypad needs no map of its own: with Num Lock off it
-sends `VK_INSERT`…`VK_DELETE`, which the arrow and Home/End names already cover,
+sends the navigation cluster's `VK_INSERT`…`VK_DELETE`, which those names cover,
 and with it on `VK_NUMPAD0`…`VK_NUMPAD9`, which arrive as text or as a command
-character. `VK_INSERT`, `VK_PRIOR`, `VK_NEXT` and the media keys stay unnamed
-because the engine has no `Key` for them, on either backend. The two wheel messages do not share a sign: a positive vertical
+character. The media keys stay unnamed on both backends: they are the desktop's
+transport controls, and no engine command binds one. The two wheel messages do not share a sign: a positive vertical
 notch is away from the user, which scrolls content up, while a positive
 horizontal one is a wheel tilted right, which reveals content to the right — the
 sign Wayland sends. Positions are divided by the window's DPI so input and
