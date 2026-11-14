@@ -229,11 +229,17 @@ optional cannot be expressed.
 Not implemented on the process loop: a selection reader for drag-and-drop
 formats, which falls back to the trait's default.
 
-A frame cannot be drawn *during* a modal sizing drag. `DefWindowProcW` runs the
-sizing loop on this thread, so the app loop is blocked inside it until the drag
-ends; DWM stretches the last frame across the growing window, and the first
-crisp frame is built when the button comes up. A re-entrant draw or a non-modal
-sizing path is what would lift that, and neither is implemented.
+A border drag belongs to the window, not to `DefWindowProcW`. A non-client press
+on an edge or a corner starts a drag here: the press position and the window's
+rectangle are kept, each mouse move resizes through `SetWindowPos`, Escape puts
+the rectangle back, and the release ends it. The app loop therefore keeps
+running through the drag, and every move is followed by a frame built for the
+new size. `DefWindowProcW`'s sizing loop would instead block this thread until
+the button came up, which is why the last frame used to be stretched across the
+growing window by DWM. A title-bar drag, `SC_SIZE` from the system menu, and
+Alt+Space still use that loop, so nothing else in the process draws while a
+window is being moved, and a resize that this window performs loses the edge
+snapping the shell's own loop gives a dragged border.
 
 A layer surface opens as a `WS_POPUP` window with `WS_EX_TOOLWINDOW`, so it stays
 out of Alt+Tab and the taskbar. `Overlay` and `Top` add `WS_EX_TOPMOST`; `Bottom`
@@ -1077,6 +1083,19 @@ document's end before reading, came back empty until the store honoured it. That
 what the probe pins today; the two refusals are what they were at the call, since this
 machine's input method never starts and so never notifies the sink.
 
+**A sizing drag froze the window it was resizing.** `WM_NCLBUTTONDOWN` went to
+`DefWindowProcW`, which runs the sizing loop on this thread: the process loop stopped
+until the button came up, every other surface with it, and DWM stretched the last frame
+over the growing window. The window performs that drag itself now. The press keeps its
+screen position and the window's rectangle, a mouse move resizes through `SetWindowPos`,
+Escape restores the rectangle, and the release or a lost capture ends it, so the loop
+runs between messages and a frame follows each move. What that gives up is in the
+sizing paragraph above: the shell's loop is where a dragged edge snaps to a monitor
+edge, and a title-bar drag still blocks the process. `resize_probe` drags the border
+with posted messages and reads the presented frame back: a client area of 525 by 375
+pixels became 585 by 415 after a 60-by-40 move, and the frame read back was 585 by 415,
+not the old size stretched.
+
 ## Status
 
 Implemented: both presenters, dma-buf zero-copy, explicit sync, HDR targets,
@@ -1085,7 +1104,8 @@ fractional scaling, a D3D11 device that renders the whole `DrawList` on
 Windows, and a Win32 window that presents it through a DXGI flip-model swap
 chain that follows its output into HDR in whichever of PQ and scRGB that output
 presents and falls back to 8-bit sRGB, feeds
-pointer, keyboard and clipboard events back to the loop, and hosts the gallery.
+pointer, keyboard and clipboard events back to the loop, resizes itself on a border
+drag so a frame follows every move, and hosts the gallery.
 Both window backends implement the portable `HostSession` trait, so an app's
 loop is written once and names no backend; the Win32 implementation is
 built and exercised on this machine, the Wayland one is checked by reading each
@@ -1114,13 +1134,13 @@ ending.
 
 Not implemented: on the Windows window, a paste that carries more than text
 into an editor (the event carries a string, though the process can read a file
-list or a picture), redraw during a modal resize drag, and
-`ExclusiveZone::Reserve`; in TSF, an observed live composition, because this
-machine's input method does not start in any application, so the preedit and
-delete-surrounding paths are pinned by unit tests only; in a capture, a frame
-larger than one output assembled into one picture, and the GDI rung's colours,
-which are 8-bit by nature; Vulkan.
-The Windows and Vulkan notes in `old/` are surveys, not code.
+list or a picture), drawing while a window is moved by its title bar (that drag
+is still the shell's modal loop), and `ExclusiveZone::Reserve`; in TSF, an
+observed live composition, because this machine's input method does not start in
+any application, so the preedit and delete-surrounding paths are pinned by unit
+tests only; in a capture, a frame larger than one output assembled into one
+picture, and the GDI rung's colours, which are 8-bit by nature; Vulkan. The
+Windows and Vulkan notes in `old/` are surveys, not code.
 
 ## See also
 
