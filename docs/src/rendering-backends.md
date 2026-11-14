@@ -226,9 +226,9 @@ thread's messages after it wakes, so a daemon with no window still receives one.
 A chord's required modifiers are what the registry binds; one the chord leaves
 optional cannot be expressed.
 
-Not implemented on the process loop: drag-and-drop onto a window. A paste
-request is read from the system clipboard instead (`ClipboardReader` is
-`Backend::selection_reader`), and a window receives no drop.
+A paste request is read from the system clipboard (`ClipboardReader` is
+`Backend::selection_reader`); a window takes drops through OLE's `IDropTarget`
+and reports them to the loop as `Event::Dnd`, not through `WM_DROPFILES`.
 
 A border drag belongs to the window, not to `DefWindowProcW`. A non-client press
 on an edge or a corner starts a drag here: the press position and the window's
@@ -1176,14 +1176,19 @@ have no hits.
 `DragSession` for both an in-app gesture and a foreign drag; see
 [Pointer Model § Drag and drop](./engine/pointer-model.md#drag-and-drop). The Win32 window
 registers an `IDropTarget` and answers every callback from the clipboard format table, and
-starts an outgoing drag on a worker STA thread because `DoDragDrop` is modal; the Wayland
+starts an outgoing drag with `DoDragDrop` on the window's own thread — a worker STA thread
+was tried first and never woke, because OLE's loop waits on mouse input only the window's
+thread receives — carrying the element's own pixels as a drag image through
+`IDragSourceHelper`, which `IDropTargetHelper` paints on the target side. The Wayland
 window handles `wl_data_device.enter`/`motion`/`drop`/`leave` and starts its own drags with
 `wl_data_source.start_drag`, reading the dropped payload from every announced MIME down its
 own pipe. Checked by four `ui-platform` contract tests over the engine's DnD events, the
 `ui-platform` suite (159 passed; the 11 failures are the pre-existing text-selection ones),
-and a `cargo check --target x86_64-unknown-linux-gnu` for the Wayland crate. The live
-gestures — a file from Explorer into the gallery, a card out into another application, and
-the Wayland wire check — have not been run yet.
+and a `cargo check --target x86_64-unknown-linux-gnu` for the Wayland crate. Live on Windows
+with synthetic mouse input: a card dragged onto the app's own panel arrives as `DroppedOn`
+with the text payload, the drag image of the card follows the pointer, and a card dragged
+out is taken by a terminal (which pasted the text) or ends as `Cancelled` over open ground.
+Still unrun: a file dragged in from Explorer, and every Wayland gesture.
 
 ## Status
 

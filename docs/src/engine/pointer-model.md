@@ -150,10 +150,12 @@ the source's state sees it already settled. A drop ends the hover without a `Dra
 
 `drag_out()` makes the threshold crossing hand the gesture to the host instead, on the same
 frame. Only the source is tracked in-app from then on: the host reports the ending as
-`Event::Dnd(DndEvent::Finished { dropped })`, which becomes `Dropped(None)` — another
-window took it, or none did — or `Cancelled`. Because the host owns the pointer for the
-whole gesture, the release never reaches this loop; the engine settles the press (and its
-ink) when `Finished` arrives.
+`Event::Dnd(DndEvent::Finished { dropped })`, which becomes `Dropped(Some(target))` when the
+payload came back to one of this app's own targets, `Dropped(None)` — another window took
+it, or none did — or `Cancelled`. Because the host owns the pointer for the whole gesture,
+the release never reaches this loop; the engine settles the press (and its ink) when
+`Finished` arrives, and ignores every pointer event in between, because those belong to the
+gesture and a release let through would click the node the drag started from.
 
 An incoming drag arrives as `Event::Dnd` phases: `Entered { pos, types }`, `Over { pos }`
 (many), then either `Dropped { pos, data }` or `Left`. The payload is revealed only at the
@@ -162,7 +164,7 @@ publishes to the operating system so the pointer shows it.
 
 | Platform | Incoming | Outgoing |
 | --- | --- | --- |
-| Win32 | OLE `IDropTarget` on the window thread; every clipboard format the table can decode is read back at the drop | `DoDragDrop` on a worker STA thread, so the window keeps painting; the payload is exported in the formats `clipboard::item_formats` knows |
+| Win32 | OLE `IDropTarget` on the window thread; every clipboard format the table can decode is read back at the drop; `IDropTargetHelper` paints the source's image and drop description | `DoDragDrop` on the window thread; the payload is exported in the formats `clipboard::item_formats` knows, and the element's own pixels are captured from the screen and registered with `IDragSourceHelper` so a target can draw them under the pointer |
 | Wayland | `wl_data_device.enter`/`motion`/`drop`/`leave`; every announced MIME is read down its own pipe after the drop, bounded by type count, size, and a two-second timeout | `wl_data_source.start_drag` with the action the payload means, `dnd_finished`/`cancelled` as the outcome |
 
 Two losses are the protocols', not the engine's. Wayland has no link action, so a `Link`
@@ -351,14 +353,21 @@ accepts is cancelled outright. Both hosts start with a permissive answer — `DR
 on Win32, the first offered MIME on Wayland — and the engine replaces it on every frame after
 the first build (`AppLoop::drop_effect`) so the pointer shows the target's real verdict.
 
-**DoDragDrop is modal, and the window is not.** Running it on the window's thread would stop
-painting for the whole gesture, and OLE's own message loop does not service this engine's
-frame timers. The Win32 backend runs it on a worker STA thread (`OleInitialize` there), posts
-the outcome as `WM_DND_FINISHED`, and lets the window thread keep building frames; incoming
-drags are ordinary `IDropTarget` callbacks on the window's own thread. The engine never
-learns where a native drop landed — another process owns that decision — so the source hears
-`Dropped(None)` or `Cancelled`, and a same-window drop arrives back through the drop target
-with the payload decoded, exactly as a foreign drag would.
+**DoDragDrop is modal, and it belongs to the thread that owns the pointer.** The first
+version ran it on a worker STA thread so the window could keep painting. Measured, that does
+not work: the worker has no window the OS feeds, so OLE's loop never observes the release —
+`QueryContinueDrag` was never called and `DoDragDrop` never returned, while the button went
+up. It now runs on the window's thread inside the turn that started the gesture, and the
+app shows the frame it had until the gesture ends; a drag image under the pointer carries
+the element through it. Two consequences had to be handled with it: the pointer events the
+window still sees during the gesture are the OS's and are dropped (otherwise the release
+clicks the source after the drag), and a drop that comes back to this app's own window is
+reported to the source as `Dropped(Some(target))`, because that landing is the one the loop
+did see. The image itself is the screen under the source node, captured into a 32-bit DIB —
+the window is GPU-composited, so nothing can ask it to render into a DC — and registered
+through `IDragSourceHelper`; a target only ever paints it through `IDropTargetHelper`, which
+the Win32 backend now instantiates too, and which OLE's helper needs `SetData` to accept
+(the image and its drag context are handed to the data object after the payload was).
 
 **One drag state served both directions.** An in-app drag knows its payload from the press; a
 native drag learns it only at the release. Two sessions would have duplicated target
