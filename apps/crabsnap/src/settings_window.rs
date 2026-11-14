@@ -14,6 +14,7 @@ use ui_core::layout::{AxisSize, Grow, SizeClass};
 use ui_core::{Decl, Id, NodeKind, Sense};
 use ui_design::Appearance;
 use ui_i18n::{Catalog, Language, LanguageChoice};
+use ui_platform::ThemeWatcher as _;
 use ui_platform::element::Element;
 use ui_platform::host::{Host, OpenOptions};
 use ui_platform::hotkeys::parse_chords;
@@ -58,6 +59,8 @@ pub(crate) fn run(args: &crate::cli::SettingsArgs, language: &Arc<Language>) -> 
         .ok()
         .and_then(|value| value.parse::<f32>().ok())
         .map(|seconds| Instant::now() + Duration::from_secs_f32(seconds));
+    let theme = ui_host::ThemeWatch::new();
+    let appearance = appearance_of(theme.preference());
     let window = SettingsWindow {
         shortcuts: Shortcut::ALL
             .iter()
@@ -86,7 +89,8 @@ pub(crate) fn run(args: &crate::cli::SettingsArgs, language: &Arc<Language>) -> 
             .unwrap_or_default(),
         config,
         catalog: Arc::clone(&catalog),
-        env: environment(language),
+        env: environment(language, appearance),
+        theme,
         kit: Md3Kit::new(),
         status: None,
         close: false,
@@ -103,14 +107,22 @@ pub(crate) fn run(args: &crate::cli::SettingsArgs, language: &Arc<Language>) -> 
     Ok(())
 }
 
-/// The app's environment: the language for words, the MD3 protocol in its dark scheme.
-fn environment(language: &Arc<Language>) -> Arc<Env> {
+/// The app's environment: the language for words, and the system's scheme for the protocol.
+fn environment(language: &Arc<Language>, appearance: Appearance) -> Arc<Env> {
     let catalogued = Env::with(Some(Env::root()), Arc::clone(language));
     Env::with_scope(
         Some(catalogued),
-        StyleScope::new(Appearance::Dark),
+        StyleScope::new(appearance),
         Md3Options::default(),
     )
+}
+
+fn appearance_of(preference: ui_platform::ThemePreference) -> Appearance {
+    if preference.is_dark(false) {
+        Appearance::Dark
+    } else {
+        Appearance::Light
+    }
 }
 
 /// 命令行的脚本路径：不想开窗时用它验证「保存 + 通知 daemon」。
@@ -228,6 +240,7 @@ struct SettingsWindow {
     config: Config,
     catalog: Arc<Catalog>,
     env: Arc<Env>,
+    theme: ui_host::ThemeWatch,
     kit: Md3Kit,
     /// What the last Save did, shown under the buttons.
     status: Option<String>,
@@ -319,6 +332,16 @@ impl SettingsWindow {
         self.choice = choice;
         self.catalog = self.language.catalog();
         self.config.ui.language = Some(self.choice.to_string());
+    }
+
+    /// Rebuild the window's scheme when the system's preference moves under it.
+    fn follow_theme(&mut self, cx: &mut ui_core::cx::Cx<'_>) {
+        let Some(preference) = self.theme.poll() else {
+            return;
+        };
+        self.env = environment(&self.language, appearance_of(preference));
+        // A declaration built under the old scheme keeps the colours it resolved then.
+        cx.invalidate_decls();
     }
 
     /// One button of a choice group, filled when it is the current value.
@@ -431,6 +454,7 @@ impl App for SettingsWindow {
         if self.close {
             cx.close_window();
         }
+        self.follow_theme(cx);
         let mut wcx = Cx::new(cx, Arc::clone(&self.env));
         // The window is a surface of the same scheme its controls resolve against.
         let pack = self.kit.pack_for(&wcx);

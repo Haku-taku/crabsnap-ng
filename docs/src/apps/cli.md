@@ -24,8 +24,8 @@ ffmpeg program. An emptied field removes its key, so the default takes over agai
 value holds one chord or several separated by commas, and one the parser cannot read is refused
 and nothing is written. Writing is surgical: only keys this build knows are touched, so the rest
 of a file that also carries `[ui]`, `[annotate.*]` or shortcut names from a newer build keeps
-them. The window paints itself with the MD3 dark scheme its controls resolve against, rather than
-with colours of its own.
+them. The window paints itself with the MD3 scheme its controls resolve against — the system's
+light or dark appearance, which it follows while open — rather than with colours of its own.
 
 The language item is a choice, not a tag to type: `Auto` follows the system's
 preferred languages, and every other button names a shipped language in its own
@@ -545,6 +545,16 @@ quit` reaches `\\.\pipe\crabsnap-daemon-1` and gets its answer. The row names bo
 and why each is shaped as it is: a socket per display, because a daemon belongs to the compositor
 it connected to, and a pipe per logon session, because every pipe on a machine shares one
 namespace.
+
+**The settings window ignored the colour scheme the system stated.** It built its MD3 scope with
+`Appearance::Dark` from its first version, while the host's theme watcher existed and the window
+never read it; in a light session the form stayed dark, and the caption kept following the
+system, so the two halves of one window disagreed. The window now takes its scheme from
+`ui_host::ThemeWatch`, rebuilds its scope and invalidates the declarations built under the old one
+when the preference moves, and the Win32 window paints its own caption from the same value.
+Checked by captures of one running window: with `AppsUseLightTheme` at 1 the form and caption
+were light; setting it to 0 and broadcasting `WM_SETTINGCHANGE` made the same window dark without
+a restart. The value was restored afterwards.
 
 ## See also
 

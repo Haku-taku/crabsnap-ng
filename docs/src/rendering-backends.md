@@ -1133,6 +1133,18 @@ with posted messages and reads the presented frame back: a client area of 525 by
 pixels became 585 by 415 after a 60-by-40 move, and the frame read back was 585 by 415,
 not the old size stretched.
 
+**The caption stayed outside the scheme the window drew with.** DWM gives a window a light
+caption until it asks for anything else, and this backend never called
+`DwmSetWindowAttribute`; `WM_SETTINGCHANGE` only set a flag that nothing read. A dark client
+area could therefore sit under a light title bar — hidden here only because a third-party
+title-bar hook repainted the caption, which made the split visible once an app kept a fixed
+scheme. The window now sets `DWMWA_USE_IMMERSIVE_DARK_MODE` from the registry value the app's
+theme watcher reads, at creation and again on every `WM_SETTINGCHANGE`, and that message also
+marks a frame owed so an idle window rebuilds its appearance. Checked by captures of one
+running settings window: with `AppsUseLightTheme` set to 1 the form and its caption were
+light; setting the value to 0 and broadcasting `WM_SETTINGCHANGE` turned the same window
+dark without a restart. The value was restored to 0 afterwards.
+
 ## Status
 
 Implemented: both presenters, dma-buf zero-copy, explicit sync, HDR targets,
@@ -1141,8 +1153,9 @@ fractional scaling, a D3D11 device that renders the whole `DrawList` on
 Windows, and a Win32 window that presents it through a DXGI flip-model swap
 chain that follows its output into HDR in whichever of PQ and scRGB that output
 presents and falls back to 8-bit sRGB, feeds
-pointer, keyboard and clipboard events back to the loop, resizes itself on a border
-drag so a frame follows every move, and hosts the gallery.
+pointer, keyboard and clipboard events back to the loop, paints its caption in the system's
+light or dark scheme, resizes itself on a border drag so a frame follows every move, and
+hosts the gallery.
 Both window backends implement the portable `HostSession` trait, so an app's
 loop is written once and names no backend; the Win32 implementation is
 built and exercised on this machine, the Wayland one is checked by reading each
