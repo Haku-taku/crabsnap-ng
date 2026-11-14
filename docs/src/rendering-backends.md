@@ -226,8 +226,9 @@ thread's messages after it wakes, so a daemon with no window still receives one.
 A chord's required modifiers are what the registry binds; one the chord leaves
 optional cannot be expressed.
 
-Not implemented on the process loop: a selection reader for drag-and-drop
-formats, which falls back to the trait's default.
+Not implemented on the process loop: drag-and-drop onto a window. A paste
+request is read from the system clipboard instead (`ClipboardReader` is
+`Backend::selection_reader`), and a window receives no drop.
 
 A border drag belongs to the window, not to `DefWindowProcW`. A non-client press
 on an edge or a corner starts a drag here: the press position and the window's
@@ -1160,6 +1161,15 @@ take the larger of the declared floor and the system's `SM_CXMINTRACK`/`SM_CYMIN
 Checked by `resize_probe`: a surface that declares its opening size as its minimum is told
 `ptMinTrackSize` equal to the window rectangle it opened with, and a 240-by-160 inward drag
 from the bottom-right corner leaves the client area at that opening size.
+
+**The status still said the Windows process loop could read no selection.** It reported a
+selection reader for drag-and-drop formats falling back to the trait's default, which stopped
+being true when `ClipboardReader` became `Backend::selection_reader` for `pin add --clipboard`.
+The real gap is drag-and-drop itself: no window handles `WM_DROPFILES` or registers an
+`IDropTarget`, on any backend. Checked by reading
+`ui-platform-win32/src/backend.rs`, where `selection_reader` returns `Some(&mut self.reader)`,
+and by searching the workspace for `WM_DROPFILES`, `DragAcceptFiles` and `IDropTarget`, which
+have no hits.
 
 ## Status
 
