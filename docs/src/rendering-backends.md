@@ -256,11 +256,12 @@ the rectangle back, and the release ends it. The app loop therefore keeps
 running through the drag, and every move is followed by a frame built for the
 new size. `DefWindowProcW`'s sizing loop would instead block this thread until
 the button came up, which is why the last frame used to be stretched across the
-growing window by DWM. A title-bar press is deferred to the host loop, which
-starts the system's move with a frame pump armed: the shell still moves and
-snaps the window, the moved surface draws from that pump, and every other
-surface draws through the host's rest-of-the-loop hook, so one window's gesture
-does not hold the rest of the process at their last frame. `SC_SIZE` from the
+growing window by DWM. A title-bar press is recorded and replayed by the host
+loop with a frame pump armed: the replayed copy reaches `DefWindowProc`, so the
+shell activates, raises, moves and snaps the window exactly as it does for a
+window without an engine, the moved surface draws from that pump, and every
+other surface draws through the host's rest-of-the-loop hook, so one window's
+gesture does not hold the rest of the process at their last frame. `SC_SIZE` from the
 system menu and Alt+Space still use that loop without a pump, so those still
 block. A resize that this window performs loses the edge snapping the shell's
 own loop gives a dragged border.
@@ -1349,6 +1350,26 @@ two windows produced 220,000–360,000 frames. The drag path is `[unverified]` i
 session: a helper's press, 200 px sweep and release from `mouse_event` left the window
 rectangle at 288,288 — the shell's move loop never engaged — so what the soaks cover is the
 stationary case, and a hand drag is still owed.
+
+**A title-bar press raised the window on release.** The window procedure takes
+`WM_NCLBUTTONDOWN` over — the sizing border resizes itself, and the title bar was handed to
+the host loop so the move could be started with a frame pump armed. `DefWindowProc` is
+where the shell activates and raises the window on that press, so returning 0 skipped it
+and the window came forward only when the release reached the default procedure. The first
+attempt called `SetForegroundWindow` from the taking branch; that reproduced one effect of
+the skipped path, not the path, and left the rest of it — the move loop, its snapping, the
+activation order — observed by hand instead of run by the shell.
+
+The press is now replayed, not replaced: the procedure records the press and returns 0,
+the host loop arms the pump and sends `WM_NCLBUTTONDOWN`/`HTCAPTION` with the same screen
+point back through the procedure, and a `replay_move` flag sends that copy to
+`DefWindowProc` untouched. The default procedure activates and raises the window and runs
+its move loop to the release, with `WM_TIMER` building frames inside it. Nothing in the
+backend raises or activates the window itself any more, and the press the shell sees is the
+one a plain window sees. Verified by posting `WM_NCLBUTTONDOWN`/`HTCAPTION` to the lower of
+two windows and reading `EnumWindows`' order back: 120 alternating presses each left the
+pressed window first, and the process neither crashed nor hung. A hand drag remains
+`[unverified]` for the reason above.
 
 What the composition chain gives up is DWM-side pacing: with `Present(0)` and the waitable,
 the chain's event was set again within microseconds of each `Present` here, so the thread ran
