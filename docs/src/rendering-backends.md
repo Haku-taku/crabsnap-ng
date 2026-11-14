@@ -133,12 +133,21 @@ last report. A numeric keypad needs no map of its own: with Num Lock off it
 sends the navigation cluster's `VK_INSERT`…`VK_DELETE`, which those names cover,
 and with it on `VK_NUMPAD0`…`VK_NUMPAD9`, which arrive as text or as a command
 character. The media keys stay unnamed on both backends: they are the desktop's
-transport controls, and no engine command binds one. The two wheel messages do not share a sign: a positive vertical
+transport controls, and no engine command binds one.
+
+The two wheel messages do not share a sign: a positive vertical
 notch is away from the user, which scrolls content up, while a positive
 horizontal one is a wheel tilted right, which reveals content to the right — the
 sign Wayland sends. Positions are divided by the window's DPI so input and
 layout share logical units. Focus, extent and scale changes carry no event of
 their own and are reported as a silent change, which still owes a frame.
+
+A finger and a pen need no code of their own: Windows promotes a contact to the
+mouse messages above, at the contact's own position, and `examples/pointer_probe`
+injects one of each to watch the press, the drag and the release arrive that way.
+Pressure, the eraser end and a second contact have no engine event to arrive in;
+a pressure channel is a change to `Event` and to every annotation tool, not a
+backend gap.
 `WM_PAINT` is validated at once and reported the same way, because the frame
 loop is what paints. A clipboard copy publishes every Windows format its content
 kind has — `CF_UNICODETEXT`, `"HTML Format"`, `CF_HDROP`, and `"PNG"` beside
