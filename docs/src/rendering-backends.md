@@ -85,8 +85,11 @@ compare against the GL backend; that needs a Linux run.
 `ui-platform-win32` is the D3D11 device's window: `CreateWindowExW` under
 per-monitor DPI awareness, an `IDXGISwapChain1` from `CreateSwapChainForHwnd`
 (`B8G8R8A8_UNORM`, two buffers, `DXGI_SWAP_EFFECT_FLIP_DISCARD`), and
-`Present(1, 0)` for vsync pacing. It implements `SceneTarget`, so the app loop
-drives it exactly as it drives the Wayland GPU window; the opening size in a
+`Present(1, 0)` for vsync pacing on the surface's render thread. The synchronous
+`Win32Presenter` still implements `SceneTarget` for a caller that draws on its
+own thread, so such a caller drives it exactly as it drives the Wayland GPU
+window; the app loop's session hands frames to the render thread instead. The
+opening size in a
 `SurfaceSpec` is logical and becomes a physical client area through
 `AdjustWindowRectExForDpi`.
 
@@ -117,18 +120,22 @@ probes passed at both extents. `WINDOW_DUMP=path` writes the frame as a PPM.
 ### The Windows window as a frame host
 
 The window is also the driver's `FrameHost`, so the engine decides when to turn
-and no app pumps messages itself. A Win32 window has no frame callback, but a
-flip-model chain hands out a frame-latency waitable object: it signals when
-another frame fits, and the window waits on it beside the thread's messages with
-`MsgWaitForMultipleObjectsEx`. That wait is the pacing point a `wl_surface`
-frame callback marks, and because it also ends on input, a border drag or a
-title-bar drag is dispatched between frames instead of behind one. `Present(0)`
-queues the frame and returns; the next draw waits for the next window. A chain
-that refuses the waitable — a driver or a composition surface that does not take
-the flag — falls back to `Present(1)` and `DwmFlush`, which is the pacing every
-build had before it, and sleeps 8 ms instead when composition is off and there
-is nothing to flush. `can_draw` reports that window: true at the first frame and
-after the compositor takes one, false while a presented frame is in flight.
+and no app pumps messages itself. A Win32 window has no frame callback. The frame
+is presented by the surface's render thread, which owns the device, the chain
+and `Present`; `Present(1)` there returns at the compositor's next blank, so the
+thread paces itself and the loop's next frame is built while the previous one is
+on screen. When the thread finishes a frame — presented, refused, or given up on
+after a rebuild — it sets the surface's frame event, and the loop waits on that
+event beside the thread's messages with `MsgWaitForMultipleObjectsEx`. That wait
+is the pacing point a `wl_surface` frame callback marks, and because it also ends
+on input, a border drag or a title-bar drag is dispatched while a frame is on the
+GPU instead of behind it. `can_draw` reports the event: true at the first frame
+and after the thread finishes one, false while a frame is in flight. The chain
+keeps `SetMaximumFrameLatency(1)` so at most one frame is queued; in `uncapped`
+mode the thread presents with `Present(0)` and the loop blocks in the hand-over
+itself, the pacing the old synchronous present had. A chain that refuses
+`DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT` is still built — the event,
+not the chain's own waitable object, is what the window waits on.
 
 Input leaves the window procedure as `ui_core::Event`: cursor motion plus a
 `TrackMouseEvent`-armed leave, the three buttons with `SetCapture` as the
@@ -194,10 +201,10 @@ pump serves the process: a window procedure queues the events of its own window,
 and a surface's turn takes only those, so two windows never read each other's
 input. `wait` is `MsgWaitForMultipleObjectsEx` over two kinds of handle: an
 auto-reset event the backend hands out as the `Waker`, and every open surface's
-frame-latency object, with the loop's deadline bounded the way the window's own
-wait is. A signaled object is consumed there and makes that surface drawable
-again, so the host's one sleep is also its pacing point; `flush` only falls back
-to `DwmFlush` for a chain that has no waitable.
+frame event, with the loop's deadline bounded the way the window's own wait is.
+A surface's render thread sets that event when it finishes a frame; the wait
+consumes it and makes the surface drawable again, so the host's one sleep is also
+its pacing point and no GPU work runs on the waiting thread.
 
 The remaining services are answered from Win32 directly: `outputs` enumerates
 monitors and reports each in logical units with its effective DPI, refresh rate
@@ -1255,13 +1262,51 @@ blocking `tick`, because a `step` may return "waiting" while the compositor hold
 frame; it passed eight consecutive runs. A chain that refuses the flag keeps `Present(1)`
 and `DwmFlush`, and `flush` falls back to the latter only for such a chain.
 
+**The frame-latency waitable paced nothing, and the UI thread still blocked in `Present`.**
+The entry above treats the chain's waitable object as the pacing point: present with
+`Present(0)` and wait until the object says another frame fits. On this machine (Windows 11,
+275 Hz output) the object was already set within about 10 µs of `Present(0)` returning, so
+the wait set opened at once. That build's pacing was not the wait at all — it was
+`Present(0)` itself, which with `SetMaximumFrameLatency(1)` blocked about 7 ms per frame on
+the thread that dispatches input, which is also why it ran 834 frames in 5 s across two
+animating windows instead of at the output's rate. The loop's input latency was therefore
+bounded by a driver call it made for every frame, and nothing about the wait set could fix
+that.
+
+The device, the chain and `Present` now belong to a render thread. The loop builds a frame
+as an owned packet — `DrawList`, `Damage`, `CanvasFrame`s, the atlas bytes a rebuilt or
+fresh device needs, and the size and scale — and sends it through a one-slot channel; the
+thread uploads, renders, copies into the back buffer and presents. The packet can cross
+threads because the draw list's text and math handles are `Arc` rather than `Rc`; that is
+the only reason a `DrawList` is `Send`, and `same_as` compares them by pointer. The loop
+then waits on the thread's own event, which the host's `MsgWaitForMultipleObjectsEx` watches
+together with the thread's message queue, so input reaches the next turn while the previous
+frame is on the GPU. `Present(1)` on the render thread returns at the compositor's blank and is what
+paces the app now — 271 fps per animating window against a 275 Hz output. Uncapped mode
+presents with `Present(0)` and keeps the loop's old block by making the hand-over itself
+wait for the frame in flight. The thread also takes the device-lost rebuild, the display
+change, the supersampling change and the readback for a dump; after a rebuild it asks for
+both atlases again, because the new device holds none of them. Teardown joins the thread
+before the window is destroyed, since the chain outlives nothing else.
+
+Measured with the gallery's border harness (200 moves, 2 px every 2 ms), the window-rectangle
+latency of the two builds is indistinguishable — 0.70–0.80 ms average and 2.0–2.8 ms p95 for
+both, because that harness times the sizing loop's handling of `WM_MOUSEMOVE`, not the frame
+that follows it. `two_windows` ran 2714 frames in 1436 turns over 5 s with two animating
+windows, and `resize_probe` passed three consecutive runs. The observable gain is the one the
+blocked `Present` was costing: 7 ms of input dispatch per frame, now zero on the UI thread.
+`Present(0)` on the render thread returned in microseconds and the loop spun at ~6800 fps,
+which is what makes `Present(1)` there — rather than another waitable plumbed through the
+loop — the pacing point.
+
 ## Status
 
 Implemented: both presenters, dma-buf zero-copy, explicit sync, HDR targets,
 offscreen layers, text on both paths, every `DrawList` primitive on both paths,
 fractional scaling, a D3D11 device that renders the whole `DrawList` on
 Windows, and a Win32 window that presents it through a DXGI flip-model swap
-chain that follows its output into HDR in whichever of PQ and scRGB that output
+chain — rendered, copied and presented on a render thread of its own — that
+follows its output into HDR in whichever of PQ and scRGB that output
 presents and falls back to 8-bit sRGB, feeds
 pointer, keyboard, clipboard and drag-and-drop events back to the loop, takes drops from
 other applications and starts its own drags into them, paints its caption in the system's

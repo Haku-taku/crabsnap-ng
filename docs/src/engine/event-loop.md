@@ -29,7 +29,7 @@ The loop lives in the portable layer; waiting and native objects do not.
 | `SurfaceHandle` | `ui-platform` (PORTABLE) | One surface as the loop sees it: a non-blocking step, its wake deadline, its closed state, a texture added after it opened |
 | `Backend` | `ui-platform` (PORTABLE trait) | Open a surface, hand over platform services, wait on platform handles |
 | `Backend` impl | `ui-platform-wayland` (PLATFORM_BOUND) | Connection, queues, poll, surfaces, clipboard, hotkeys, outputs |
-| `Backend` impl | `ui-platform-win32` (PLATFORM_BOUND) | One message pump for every window, an event and each surface's frame-latency object as wakers, clipboard, outputs, languages |
+| `Backend` impl | `ui-platform-win32` (PLATFORM_BOUND) | One message pump for every window, the wake event and each surface's render-thread event as wakers, clipboard, outputs, languages |
 | `MessageCtx` | `ui-platform` (PORTABLE) | What a channel handler or a hotkey handler may ask of the loop: the outputs, a surface it opens, a texture on it, a frame on it |
 
 `Host` contains no protocol types, no file descriptors and no `WaylandLink`. An application
@@ -89,6 +89,13 @@ flight or a build that read the clock — reports it through its handle's `next_
 the loop folds into the same deadline. A turn that drew is not evidence that nothing else is
 owed: on a backend where no compositor event follows a presented frame, only the deadline brings
 the loop straight back. A paste transfer in flight reports the pipe's read deadline the same way.
+
+Windows has no frame callback, so its surface opens the frame window differently: a render
+thread owns the device, the chain and `Present`, waits at the compositor's blank in `Present(1)`,
+and sets the surface's event when the frame is finished. That event joins the same
+`MsgWaitForMultipleObjectsEx` as the wake event and the message queue, so a turn's frame is on
+the GPU while the loop dispatches the input that ends its wait — the wait is a message wait,
+not a driver call on the loop's thread.
 
 The loop takes a turn before it waits. The first frame of a surface must not wait for an event
 that may never come, and a surface opened with a pin already on it has work due immediately.

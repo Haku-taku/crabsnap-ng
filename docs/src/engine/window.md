@@ -34,11 +34,12 @@ release point before rewriting a buffer; see
 ## Frame pacing
 
 `can_draw()` reports whether the compositor's next frame window is open — on
-Wayland because its frame callback arrived, on Windows because the swap chain's
-frame-latency object is signaled — and `wait_for_frame()` blocks until it is,
-with a timeout so a compositor that never replies cannot hang the application.
-One commit produces at most one callback, so a loop that draws without waiting
-builds frames nobody displays.
+Wayland because its frame callback arrived, on Windows because the surface's
+render thread finished the frame it was handed (its `Present(1)` returns at the
+compositor's blank) — and `wait_for_frame()` blocks until it is, with a timeout
+so a compositor that never replies cannot hang the application. One commit
+produces at most one callback, so a loop that draws without waiting builds frames
+nobody displays.
 
 This is also why the engine asks the window instead of guessing a refresh
 rate: the frame window is opened by the compositor, never computed by the

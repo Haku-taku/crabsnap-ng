@@ -49,9 +49,9 @@ would clear either may never come.
   sets the scale, hands back the pointer, and lets the app build.
 
 `Driver::pace` waits for the next frame window after presenting — a Wayland frame
-callback, or on Windows the swap chain's frame-latency object — so the next turn
-lands in a new window. `uncapped` is a switch on the driver, not a branch in the
-app.
+callback, or on Windows the render thread's finished-frame event — so the next
+turn lands in a new window. `uncapped` is a switch on the driver, not a branch in
+the app.
 
 > **Wrong path:** letting an application decide "this frame does not need
 > presenting". That is a second copy of the rule above, and the first one to
@@ -78,6 +78,23 @@ it returns an error unless the CPU presenter was requested. `tick` runs one
 turn: ingest, decide, wait, build, present, pace. The field order guarantees
 teardown: GPU objects while the surface still exists, then the loop, then the
 window.
+
+The Win32 session has the same loop with the GPU half moved off it:
+
+```rust
+pub struct Session<A: App> {
+    render: RenderThread,   // device, chain, Present; joined in `Drop`
+    driver: Driver,
+    lp: AppLoop<A>,
+    win: Win32Window,
+    pace: Arc<FramePace>,
+    // atlases, pointer, closed, supersample
+}
+```
+
+`present` builds the frame on the loop's thread and hands the owned packet to
+`render`; `pace` waits on that thread's event, which is why the field order
+still has to run the render thread down before the window goes.
 
 `split()` exists for hosts that genuinely need cross-layer access (clipboard
 routing, scripted input). It is not a general escape hatch.
