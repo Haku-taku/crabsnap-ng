@@ -19,6 +19,7 @@ OverlayPlacement {
     offset: f32,             // gap from the anchor
     flip: bool,              // flip to the opposite side before clamping
     match_anchor_width: bool,// combos and menus: panel width follows the anchor
+    presentation: Presentation, // Parent, or a surface of its own
 }
 ```
 
@@ -28,12 +29,40 @@ in-flow layout, using the anchor's resolved rectangle:
 1. Resolve the anchor (`Node` id or a point supplied by the app).
 2. Place on the requested side with the requested gap.
 3. If it overflows, flip to the opposite side, then clamp into the viewport.
+   A `Presentation::Platform` panel skips both: the platform places it.
 4. Reset the clip chain at the overlay, so an ancestor's `Clip::Hidden` cannot
    cut it.
 
-The overlay stays inside the main surface. There is no `xdg_popup` and no
-separate Wayland surface; the menu already proved that a floating region can be
-painted into the same surface.
+By default the panel is painted into its parent's surface, in the same paint
+list and the same hit index as the content it covers. A panel that must leave
+the window asks for a surface of its own.
+
+## Where a panel is painted
+
+| `Presentation` | Surface | Shape |
+| --- | --- | --- |
+| `Parent` | the parent's | A panel that fits: an in-window menu, a combo list |
+| `Platform` | one the platform places | A panel that may leave the window |
+
+`Presentation::Parent` is the default. `Presentation::Platform` hands the
+subtree to a surface of its own; the engine still lays it out in the parent
+tree, paints only that subtree into the new surface, and routes its input back
+into the parent tree. The application declares the same `Decl::overlay` either
+way and never names a surface.
+
+A platform whose popup support is missing falls back to `Parent`, so a panel
+never disappears because a surface could not be opened.
+
+The engine's table of open platform surfaces mirrors the tree; it is not a
+second source of truth. A binding exists only while its subtree does, so a
+dismissed panel stays dismissed by being undeclared. The frame that first
+declares a panel is painted with it held back, because the host's answer comes
+after that frame; see [the binding table](./window.md#binding-table).
+
+The platform decides the final position against its own output. The engine does
+not clamp a platform panel into the parent's viewport: a menu near the bottom
+edge of a short window must be allowed past it. See
+[Presentation surfaces](./window.md#presentation-surfaces).
 
 A `Point` anchor has zero size, so `Center` centres the panel on that point and
 `Start`/`End` put one of its edges there. That is how a panel hangs under a
@@ -62,6 +91,11 @@ declared after it, regardless of declaration order.
 - **An outside press asks the open panel to close.** The engine knows the
   panel rectangle and the press position, so it emits a payload-free
   `Change::Dismissed` to the panel's root. The app decides whether to obey.
+  A platform panel can also be dismissed by its window server — a Wayland
+  `popup_done`, a Win32 capture changing. The host reports that with
+  `AppLoop::dismiss_panel`, which fills the same `dismissed` slot an outside
+  press does, so `cx.dismissed()` and the `Change::Dismissed` a control derives
+  from it answer either cause.
 - **While open, the panel owns the keyboard.** `popup_root` scopes focus;
   `settle_focus` takes focus on open and hands it back on close; navigation
   keys loop inside the panel, with `Home`/`End`.
@@ -71,6 +105,8 @@ declared after it, regardless of declaration order.
   hands focus back to the panel that opened it, or to the page when none is
   left. A second panel is a float of its own even when the app declares it
   inside the first: the walk defers a nested float the way paint already did.
+  When both are platform panels, the inner surface is owned by the outer
+  panel's surface, so the grab stays with the topmost one.
 
 ## Tooltips
 
@@ -132,6 +168,23 @@ the panel back into the space its own branch will add. Caught by
 declared beside an offset shell, anchored to a button inside it, must land
 under that button.
 
+**A floating region was assumed to belong in its parent's surface.** The first
+contract said a popover never needs `xdg_popup`, because the engine-drawn menu
+had already shown that a floating region paints correctly inside one surface.
+The menu proves only that the panel can be *painted* there: a combo panel in a
+short window, a tooltip under a trigger at the output's bottom edge, and a menu
+taller than its window have nowhere to draw, and no in-surface option exists
+for them. `OverlayPlacement::presentation` now selects `Parent` or `Platform`,
+and the engine opens, positions and closes the platform surface itself.
+
+`a_panel_gets_a_surface_of_its_own_or_falls_back_to_its_parent`,
+`a_closed_panel_is_reported_as_dismissed_and_not_reopened` and
+`a_panel_inside_a_panel_is_placed_against_the_outer_surface` in
+`crates/ui-platform/tests/host_loop.rs` pin the binding; `place_popup` is pinned
+in `crates/ui-platform/src/window.rs`. What none of them shows is the panel on
+screen: the gallery page whose window is 200 px tall with a 400 px menu is
+still unwritten, and the Wayland surface has not been run under a compositor.
+
 ## Traps
 
 | Change | Symptom |
@@ -142,6 +195,9 @@ under that button.
 | Let an ancestor clip apply to the overlay | A popover is cut off inside a scrolled list |
 | Keep the open set in the engine | Two sources of truth; a dismissed panel reappears |
 | Defer only top-level floats in the walk | A panel nested in another paints above a sibling, and the press lands on the sibling |
+| Keep every panel in its parent's surface | A panel near the window's edge has nowhere to draw |
+| Clamp a platform panel into the parent's viewport | A menu cannot leave a window that straddles two outputs |
+| Resize a platform panel to fit the output | The platform cuts content the engine laid out |
 
 ## Status
 
@@ -150,8 +206,17 @@ priority, dismissal, keyboard scope, tooltips, combo panels, and a panel
 opened from inside another panel (dismissal, keyboard scope and focus return
 all key on the topmost one).
 
+`Presentation::Platform`: the engine opens, positions and closes a surface for a
+panel, and a nested panel hangs off the outer popup. On Wayland that is
+`xdg_popup` with a grab; the GPU presenter shows the panel, and the CPU
+presenter refuses so the panel paints in its parent. On Win32 that is an owned
+non-activating `WS_POPUP` holding the mouse capture. Compile-verified only —
+nothing has run either path. See
+[Presentation surfaces](./window.md#presentation-surfaces).
+
 Not implemented: `Anchor::Point` has no production user yet. Arrow tails and
-other decorations belong to the style layer.
+other decorations belong to the style layer. Exit animation across a platform
+surface: a presenter closes with its subtree.
 
 ## See also
 
