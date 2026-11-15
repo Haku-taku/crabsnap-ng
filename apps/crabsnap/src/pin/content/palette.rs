@@ -320,7 +320,7 @@ impl Palette {
         }
         let mut field_decl = text.resolve();
         if let NodeData::Text { block, .. } = &mut field_decl.data {
-            std::rc::Rc::make_mut(block).input_base = Some(0);
+            std::sync::Arc::make_mut(block).input_base = Some(0);
         }
         field_decl.size_class = SizeClass {
             width: AxisSize::fixed(room),

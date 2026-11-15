@@ -7,7 +7,7 @@
 //! do. Shaping is the host's and is asked for during the build, so the frame a picture is
 //! painted with is the frame measured on that same frame.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use ui_core::cx::Cx;
 use ui_core::draw::{DrawList, RectPrim, TextPrim};
@@ -288,7 +288,7 @@ impl TextMark {
         list.push_text(
             owner,
             TextPrim {
-                block: Rc::new(self.block()),
+                block: Arc::new(self.block()),
                 origin: Point::new(
                     frame.origin.x + self.padding,
                     frame.origin.y + self.padding,

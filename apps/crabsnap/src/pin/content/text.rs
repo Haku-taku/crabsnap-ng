@@ -160,7 +160,7 @@ impl Text {
         }
         let mut decl = text.resolve();
         if let NodeData::Text { block, .. } = &mut decl.data {
-            std::rc::Rc::make_mut(block).input_base = Some(0);
+            std::sync::Arc::make_mut(block).input_base = Some(0);
         }
         self.field(frame, inner, decl)
     }
@@ -446,7 +446,7 @@ pub(crate) fn text_decl(id: Id, block: TextBlock, size: f32, ink: Color, max_wid
     let mut decl = Decl::container(id, NodeKind::Text);
     decl.data = NodeData::Text {
         ink,
-        block: std::rc::Rc::new(block),
+        block: std::sync::Arc::new(block),
         caret: None,
         selection: None,
         composing: None,
