@@ -11,8 +11,8 @@ that.
 
 ## Prerequisites
 
-- The toolchain in `rust-toolchain.toml` (edition 2024,
-  `rust-version = "1.99"`).
+- The toolchain in `rust-toolchain.toml` (edition 2024, `rust-version = "1.99"`).
+  It pins a dated nightly; [Building](./development/building.md#toolchain) says why.
 - A Wayland session for anything that opens a window. Unit tests need neither
   a display nor a compositor.
 - `crates/assets` is excluded from the workspace: it holds fonts, not a crate.

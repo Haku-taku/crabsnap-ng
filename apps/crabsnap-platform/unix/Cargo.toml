@@ -9,11 +9,9 @@ description = "The daemon channel on a Unix session: a sequence-packet socket in
 [lib]
 path = "src/platform.rs"
 
-[dependencies]
-crabsnap-core = { path = "../../crabsnap-core" }
-
 # The crate is empty off unix, so these are declarations only a Unix build compiles.
 [target.'cfg(unix)'.dependencies]
+crabsnap-core = { path = "../../crabsnap-core" }
 image = { version = "0.25", default-features = false, features = ["png"] }
 libc = "0.2"
 rustix = { version = "1", features = ["event", "net"] }

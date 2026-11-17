@@ -2334,7 +2334,6 @@ name = "ui-paint"
 version = "0.1.0"
 dependencies = [
  "ui-core",
- "zeno",
 ]
 
 [[package]]
@@ -2376,7 +2375,6 @@ dependencies = [
  "ui-paint",
  "ui-paint-gpu",
  "ui-platform",
- "ui-text",
  "ui-text-fontique",
  "wayland-client",
  "wayland-protocols",
@@ -2423,7 +2421,6 @@ dependencies = [
  "parley_emoji",
  "ui-core",
  "unicode-bidi",
- "unicode-bidi-mirroring",
  "unicode-linebreak",
  "unicode-properties",
 ]

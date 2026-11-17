@@ -15,6 +15,16 @@ repository root does not find a manifest.
 | Look or speed | `cargo build --release` and `--release` on every run |
 | Frame profile | `cargo build --release --example gallery --features profile` |
 
+## Toolchain
+
+`rust-toolchain.toml` pins a dated nightly. On the nightly channel Cargo passes
+`-Zembed-metadata=no` by default, so a `.rlib` no longer stores a second copy of
+the metadata that pipelined compilation already writes to its `.rmeta`. On this
+workspace that cut the artifacts directory by 16% in `dev` and 34% in `release`
+(`-p ui-platform`, 2026-11-17, with `build.build-dir` enabled). `rust-version =
+"1.99"` still states the language floor; bump the pinned date deliberately,
+because an unpinned `nightly` moves under you.
+
 ## Profiles
 
 `Cargo.toml` sets these deliberately:
