@@ -70,11 +70,30 @@ Reading this during `view` sees last frame's layout. That is the right anchor
 for a scrollbar, whose shapes live in the container's own space and must not
 move with the content.
 
+The offset half is this frame's as soon as the build writes it: a `set_scroll`
+earlier in the same `view` is folded into what `scroll_of` reports afterwards.
+A list that moves the scroller and then asks which rows are visible would
+otherwise window the rows of where the scroller stood last frame and paint blank
+where the new rows belong, with nothing left to ask for the frame that fixes it.
+An animated `scroll_to` is not folded in: the frame still paints where the spring
+starts.
+
 ## Writing the offset back
 
 The order is: app scroll requests, `apply`, re-apply the engine's stored
 offsets, size transitions, presence, layout. The re-apply exists because the
 app's declaration cannot reset a wheel position it never set.
+
+The stored offset is exact and the painted one is snapped. `scroll_x`/`scroll_y`
+receive the stored offset rounded to the grid text is rasterized on — the device
+scale times the renderer's supersample — while the table keeps the wheel's exact
+sum, so a trackpad's sub-pixel steps accumulate instead of rounding themselves
+away and the content moves a whole raster pixel once they cross half of one. Text
+takes a vertical subpixel phase; a fractional origin would give it a new
+rasterization on every step while the rows and fills around it glide, which reads
+as the text jittering. Every desktop scrolls by whole device pixels for the same
+reason. `on_text_grid` is the one place that rounding happens, and only for
+offsets the engine owns: an app-declared `scroll_y` is the app's.
 
 Layout clamps the offset into `[0, extent - viewport]` so the wheel cannot
 move content past its end. The exception is `params.scroll_elastic`, which the
@@ -90,6 +109,15 @@ Immediately after layout, the engine reconciles the stored offset table against
 the extents layout just wrote: an offset the content no longer reaches is
 pulled back, and the entry of a node that is gone is dropped. Scrollers a pan or
 a spring is stretching are exempt, for the same reason layout is.
+
+The same pass compares each scroller's content box and viewport with the ones the
+build read before layout, and a frame that changed either asks for the next one.
+A windowed list declared the rows the old box reached, so this frame is showing
+the rows of the box it used to be. A short directory replaced by a long one is
+the case that found this: a `Scroll::vertical` hugs its content, so the viewport
+was the short list's own height, and the long list stopped a few rows above its
+end until an unrelated frame arrived. The clamped offset above is the same fact
+seen through the offset: a range only moves when the box does.
 
 Layout itself closes the same gap inside the pass. The content origin is
 computed before the children are placed, so it can only use the previous
@@ -185,7 +213,15 @@ no control code.
 
 - `Scroll::fixed(id, w, h)` — content at its own size, viewport clips (Qt's
   `widgetResizable=false`). `Scroll::vertical(id, max_h)` hugs its content
-  up to a ceiling; `Scroll::both(id)` fills the parent and scrolls both axes.
+  up to a ceiling, which is right for a menu or a capped code block and wrong
+  for a panel: `Scroll::fill(id)` takes the height the parent offers and
+  scrolls vertically only, `Scroll::both(id)` fills the parent and scrolls both
+  axes; `Scroll::fixed_both(id, w, h)` fixes the viewport instead, for content
+  that must overflow a box the parent does not size.
+- A region-size scroller fills; a content-size scroller hugs. A list or page
+  that hugs its content inside a fixed panel leaves the clip, the scrollbar
+  and the hit target at the content's bottom, so a drag or a pointer below the
+  last row lands outside the viewport the panel shows.
 - `Scroll::child` takes an evaluated `Decl`, so content is paint-only. Content
   that must report interaction (a nav drawer's `Change::Selected`) stays an
   `Element`: put it in a `Container` with `.scrollable()` and
@@ -207,7 +243,10 @@ no control code.
 | Use `SCROLL` and expect the engine to keep the offset | The app gets `Value` deltas and owns the state |
 | Add a threshold for "the coast ended" | The motion ends while the spring still moves, or never ends |
 | Put page content straight into a fixed-height column | A document taller than the window runs past it, and the caret reveal has no viewport to move |
+| Give a panel's scroller a hug size | A short list's clip, bar and wheel area stop at its last row, inside a panel with room to spare |
 | Choose a row window from the raw offset | A rubber-band frame looks past every row and the list goes blank until the spring returns |
+| Move the scroller, then choose the window from the offset read before it | The list declares the rows of its old position and paints blank where the new ones belong |
+| Change what a windowed list holds without giving it the frame after | The window covers the old box, so the tail of the list is blank until unrelated input arrives |
 | Keep measured row heights in the widget, not in the app | Every frame starts from the estimate, so the spacers never agree with the rows they stand for |
 | Predict an unmeasured row at the one-line floor | A stretch never laid out scrolls at the shortest row's rate: five times too fast for wrapped rows |
 | Snap on every wheel event instead of at the end of the burst | A trackpad's dozens of small steps each turn a page |
@@ -215,6 +254,27 @@ no control code.
 | Skip the root's own clip when painting | A scroller returned as the whole app draws every row outside its box |
 
 ## Corrections
+
+**A windowed list could declare the rows of its old position.** The picker reveals a row by
+asking `set_scroll` during `view`, then chooses which rows to declare from `scroll_of`. The
+request was merged only after `view` returned, so that read still answered last frame's offset:
+the frame declared the rows around where the list stood and painted nothing where the revealed
+row belonged, and nothing asked for a frame that would choose the window again, so the gap
+stayed until unrelated input rebuilt it. A `set_scroll` the build has already made is now what
+the rest of that build reads back from `scroll_of`. Pinned by
+`a_revealed_row_is_declared_by_the_frame_that_reveals_it` in `crates/ui-platform/src/view/tests.rs`.
+
+**A list stopped above its end after the content grew.** Clicking a place whose directory was
+longer than the one on screen listed it short: `C:\`'s last entry was missing from the list
+until the pointer moved and the place's hover faded. The list hugs its content, so the viewport
+the receiving frame read from `scroll_of` was the *old, short* directory's height; the rows
+past it were replaced by the window's bottom spacer, and no fact asked for the frame that would
+window again — the listing's completion had already bought the one frame that polled it. The
+engine now compares every scroller's content box and viewport with the ones the build read, and
+a frame that changed either asks for the next. That also covers the clamped-offset case, since
+a range only moves when the box does. Pinned by
+`a_list_whose_viewport_grows_owes_the_frame_that_rewindows_it` and
+`a_shrunken_list_owes_the_frame_that_rewindows_it`.
 
 **The wheel's sideways convention changed twice.** The handler first gave an upright wheel to
 whichever container scrolled only x, so a code card with wrapping off swallowed every step and the
@@ -405,6 +465,30 @@ node's; the rect it pushes is the root's mask, which layout had already intersec
 by `a_row_below_the_viewport_paints_no_primitive` in
 `crates/ui-platform/src/view_scroll_test.rs`.
 
+**The painted offset carried the wheel's exact fraction.** The stored offset was written
+straight into `scroll_x`/`scroll_y`, so on a fractional display scale every step moved the
+content by part of a device pixel. Text takes a vertical subpixel phase, and that phase
+changed with every step: the glyphs re-rasterized each frame while the rows and fills around
+them moved smoothly, which reads as the text jittering — the complaint was a virtual list
+whose words shook while scrolling. The painted offset is now snapped to the grid text is
+rasterized on by `on_text_grid`, and the stored one stays exact. Caught by
+`an_engine_owned_offset_paints_on_the_text_grid` in
+`crates/ui-platform/src/view_scroll_test.rs` (red: a stored 10.5 at scale 1.5 painted at
+15.75 device pixels instead of 16).
+
+**A panel's scroller hugged its content, so a drag was cut where the content ended.** The
+picker's list, grid and sidebar used `Scroll::vertical`, which sizes itself to its content up
+to a ceiling: in a folder of one row the viewport — and with it the clip — was 32 units tall
+inside a 463-unit panel. A row dragged below the last one left the viewport's box and was
+clipped at the content's own bottom, in a place the panel had room for; the scrollbar also
+covered only the first third of the panel and a reveal scrolled a list that already fit. The
+scroll container's size must follow the *parent's* offer, not its content: `Scroll::fill(id)`
+is the vertical constructor with `AxisSize::fill` on both axes and `Grow::Yes` down the main
+axis, and `Scroll::both` now grows on both axes for the same reason. Hugging stays correct
+where the ceiling is the point — a menu, a code block capped at N lines. Caught by
+`a_short_list_fills_the_panel_below_its_header` in `crates/ui-picker/src/view.rs` (red: 32
+units against 463 available).
+
 ## Long content
 
 Nothing is windowed: layout walks every node, and every node still costs its declaration, its
@@ -479,7 +563,8 @@ measurement, since the same text wraps differently: start a fresh table rather t
 the old one.
 
 Before the first layout there is no viewport to intersect, so the window assumes 800 logical
-units of height; the next frame corrects it.
+units of height. The frame that lays the scroller out has changed its box, which is what makes
+the engine ask for the frame that windows from the real one.
 
 ### Snap paging
 
@@ -534,11 +619,14 @@ dependency tracking, `set_scroll`/`scroll_to`/`bring_into_view`, the caret of a
 focused input revealed line by line (`bring_rect_into_view`), wheel routing by
 device axis with shift for the sideways one and single-direction containers
 taking the upright wheel, scrollbar geometry on both axes with engine-owned
-fading and thumb dragging, pan chained through nested scrollers with a rubber
+fading and thumb dragging, a fill-height vertical constructor (`Scroll::fill`)
+beside the hugging one, pan chained through nested scrollers with a rubber
 band, inertia with spring return, a row window (`RowWindow`) that declares only
 the rows a viewport shows, measured row heights (`RowHeights`) so the window also
-works for rows a layout sizes to their wrapped content (`List` uses both), and snap
-paging on either axis, chosen at the end of a wheel burst or a released drag.
+works for rows a layout sizes to their wrapped content (`List` uses both), snap
+paging on either axis, chosen at the end of a wheel burst or a released drag, and
+painted offsets snapped to the text raster grid so a glide keeps every glyph on one
+rasterization.
 
 Not implemented: a document still costs its declaration rebuild, its layout walk
 and a hit entry per node per frame — culling and windowing only remove the

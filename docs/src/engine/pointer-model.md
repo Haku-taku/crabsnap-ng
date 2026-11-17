@@ -69,8 +69,10 @@ legacy overlay's right-tap/right-hold split (`RIGHT_TAP_MS` there), and it is
 why a mark's context menu still opens with a quick right click while a held
 right press aims the loupe.
 
-A node without `SECONDARY` in its ancestry keeps the immediate behaviour: the
-menu opens on the press, before the release.
+A node without `SECONDARY` in its ancestry and no drag payload keeps the immediate
+behaviour: the menu opens on the press, before the release. A payload makes the press a
+possible drag even without `SECONDARY`, so its menu waits for the release and the
+`SECONDARY_TAP` rule decides — the same wait a declaring node gets.
 
 ## The middle button
 
@@ -103,6 +105,28 @@ other gesture.
   the start of the frame, so a control's root can answer `clicked_within` even
   when a descendant was hit.
 
+### Click counts {#clicks}
+
+A click carries how many presses of its button it was part of. A press counts as the
+continuation of the previous one when it arrives within the system's double-click time
+and rectangle (`GetDoubleClickTime` and `SM_CXDOUBLECLK`/`SM_CYDOUBLECLK`, scaled to
+logical units) of the previous release of the same button; the count is per button, so
+a right click does not extend a left burst. A third press in the same burst reads 3,
+and a press that travels past `DRAG_THRESHOLD` ends the burst instead of extending it.
+
+The count reaches a control three ways, all naming the frame's click:
+
+| Surface | What it says |
+| --- | --- |
+| `Change::Secondary { down, clicks }` / `Change::Middle { down, clicks }` | the catch-all kinds' burst length, on the press and the release |
+| `WidgetState::clicks` / `cx.clicks_within(id)` | the same number for a primary click, and for any ancestor of the clicked node |
+| `FrameInfo::clicks` | the burst length of this frame's click, for an app that draws from `view` directly |
+
+`Dep::ClicksWithin` is what makes a control rebuild on the second press and not only on
+the first. Neither `Activated` nor `Secondary` is split into single- and double-click
+variants: the control decides what a count means, which is why a file row opens on 2 and
+a text field selects a word on 2 while both keep their single-click behavior.
+
 ## Drag and drop {#drag-and-drop}
 
 A drag can carry a payload, and the payload can cross the surface boundary: out to the
@@ -121,11 +145,19 @@ machinery above is unchanged — a press that travels past the threshold is stil
 `Container` forwards all three, and `Decl` is what every element already builds, so no
 element needs to know drag and drop exists.
 
-The payload is a `DragData`: a list of `DragItem { mime, data }` representations plus a
-`DropEffect` (`Copy` by default, `Move`, `Link`). Patterns compare ASCII-insensitively, and
+The payload is a `DragData`: a list of `DragItem { mime, data }` representations, the
+effects it may be put to (`DropEffects`), and the one a target performs without a modifier
+(`DropEffect`, `Copy` by default). With a modifier held, `DragData::negotiate` answers:
+Ctrl copies, Shift moves, Ctrl+Shift links, clamped to the permitted set — the Wayland
+table, which Windows matches apart from Command. Patterns compare ASCII-insensitively, and
 `*`, `*/*`, and a family such as `text/*` are patterns; anything else is an exact type. A
 `DROP` node that never called `accept_drop` — a plain `sense(Sense::DROP)` — takes any
 drag, which is what gesture-only dragging did before payloads existed.
+
+The secondary button drags too: a press on a node with a payload arms the gesture, the
+release that crossed the threshold is a drop rather than a menu tap, and
+`DropReport::button` carries which button started it. A target reads `Secondary` as "ask
+where this should go" — Explorer's right-drag menu, drawn by the app at the release point.
 
 ### Inside the surface
 
@@ -134,8 +166,12 @@ up from the hit to the nearest node that declares `DROP` and accepts one of the 
 types, and reports:
 
 - the target: `Change::DragEntered { types }` when it becomes the target, `DragExited` when
-  it stops being one, and `DroppedOn(data)` when the release lands on it;
-- the source: `DragStarted`, `Moved`, `Dropped(Some(target))` or `Cancelled`.
+  it stops being one, and `DroppedOn(DropReport)` when the release lands on it;
+- the source: `DragStarted`, `Moved`, `Dropped { target, outcome }` or `Cancelled`.
+
+A `DropReport` carries the decoded payload, the negotiated effect, the modifiers and button
+held at the release, the point, the side that performs the effect (`Performer::Target` for
+an in-app drop), and whether the drag came from another application (`foreign`).
 
 `cx.drag_over_within(id)` (and `WidgetState::drag_over`) is true while the live drag's
 target is the node or inside it, which is what a highlight reads; `cx.drag_types()` is what
@@ -150,22 +186,30 @@ the source's state sees it already settled. A drop ends the hover without a `Dra
 
 `drag_out()` makes the threshold crossing hand the gesture to the host instead, on the same
 frame. Only the source is tracked in-app from then on: the host reports the ending as
-`Event::Dnd(DndEvent::Finished { dropped })`, which becomes `Dropped(Some(target))` when the
-payload came back to one of this app's own targets, `Dropped(None)` — another window took
-it, or none did — or `Cancelled`. Because the host owns the pointer for the whole gesture,
-the release never reaches this loop; the engine settles the press (and its ink) when
-`Finished` arrives, and ignores every pointer event in between, because those belong to the
-gesture and a release let through would click the node the drag started from.
+`Event::Dnd(DndEvent::Finished { outcome })`, which becomes `Change::Dropped { target,
+outcome }` — `target` names one of this app's own targets when the payload came back to it —
+or `Cancelled`. Because the host owns the pointer for the whole gesture, the release never
+reaches this loop; the engine settles the press (and its ink) when `Finished` arrives, and
+ignores every pointer event in between, because those belong to the gesture and a release
+let through would click the node the drag started from.
 
-An incoming drag arrives as `Event::Dnd` phases: `Entered { pos, types }`, `Over { pos }`
-(many), then either `Dropped { pos, data }` or `Left`. The payload is revealed only at the
-drop. `AppLoop::drop_effect()` is the effect the resolved target negotiated, which each host
-publishes to the operating system so the pointer shows it.
+The two platforms split a move differently, and `DropOutcome { action, performed_by }`
+names the half the source still owes. On Win32 a target signals an optimized move by
+clearing the source's path list (`SetData` with a null medium), so `performed_by` is
+`Target` and the source does nothing; without that signal the target only copied, and the
+source removes the originals. On Wayland the source always performs a move after
+`dnd_finished`. An in-app drop is `Performer::Target`.
+
+An incoming drag arrives as `Event::Dnd` phases: `Entered { pos, types, effects }`,
+`Over { pos }` (many), then either `Dropped { pos, data, button, performer }` or `Left`.
+The payload is revealed only at the drop. `AppLoop::drop_effect()` is the effect the
+resolved target negotiated, which each host publishes to the operating system so the
+pointer shows it.
 
 | Platform | Incoming | Outgoing |
 | --- | --- | --- |
-| Win32 | OLE `IDropTarget` on the window thread; every clipboard format the table can decode is read back at the drop; `IDropTargetHelper` paints the source's image and drop description | `DoDragDrop` on the window thread, its modal loop pumping the surface so frames keep arriving; the payload is exported in the formats `clipboard::item_formats` knows, and the source node's own drawing is rendered off-screen and registered with `IDragSourceHelper` so a target can draw it under the pointer |
-| Wayland | `wl_data_device.enter`/`motion`/`drop`/`leave`; every announced MIME is read down its own pipe after the drop, bounded by type count, size, and a two-second timeout | `wl_data_source.start_drag` with the action the payload means, `dnd_finished`/`cancelled` as the outcome |
+| Win32 | OLE `IDropTarget` on the window thread; every clipboard format the table can decode is read back at the drop; `IDropTargetHelper` paints the source's image and drop description | `DoDragDrop` on the window thread, its modal loop pumping the surface so frames keep arriving; the payload is exported in the formats `clipboard::item_formats` knows, plus `Preferred DropEffect` for the source's preference, and the source node's own drawing is rendered off-screen and registered with `IDragSourceHelper` so a target can draw it under the pointer |
+| Wayland | `wl_data_device.enter`/`motion`/`drop`/`leave`; every announced MIME is read down its own pipe after the drop, bounded by type count, size, and a two-second timeout | `wl_data_source.start_drag` with every action the payload permits, `dnd_finished`/`cancelled` as the outcome |
 
 Two losses are the protocols', not the engine's. Wayland has no link action, so a `Link`
 payload is offered as `Copy`; and a Win32 payload whose types have no Windows form (anything
@@ -221,10 +265,9 @@ surface cannot disagree. A tree whose root is `PassThrough` and that holds nothi
 publishes no rectangles at all: an empty region, a surface the compositor forwards every click
 through.
 
-The engine's context menu is the one thing drawn without a node, so `collect_input_areas` adds its
-panel to that union by hand. The menu opens at the click and may reach past the node that declared
-it; without the panel, a row outside the union would be a painted row the compositor hands to
-whatever is under the surface.
+The union has no exception: the engine's context menu is a declared panel, so its rows are nodes
+in the index like any control's. A menu that reaches past the node that declared it is still in
+the region, because it is still part of the tree.
 
 The region is pending surface state, so it rides a commit. The frame that computed it draws and
 commits; when nothing changed, `commit_pending` reports the pending region and the engine commits
@@ -251,8 +294,8 @@ sends `Exclusive` first (only when the surface has no keyboard focus) and `OnDem
 with its own commit — the intermediate value has to be the committed one to be seen.
 
 "The pointer is on what we consume" is the same fact the input region is built from — the
-topmost consumer under the pointer — plus two states the region cannot express: a live gesture
-(a drag keeps its capture past the node's edge) and the engine menu, which has no node. The
+topmost consumer under the pointer — plus one state the region cannot express: a live gesture,
+where a drag keeps its capture past the node's edge. The
 engine applies it only for `FollowPointer`; every other mode is the app's one-time choice. It
 travels with a frame, so a target that must act on the pointer leaving cannot wait for it: a
 still pointer builds no frame, and the departure would never be reported. A backend that sees
@@ -279,6 +322,7 @@ and `EXCLUSIVE` then `ON_DEMAND` as it returns.
 | Start a drag from a button held before the surface appeared | The hotkey's own press is read as the drag's origin; catch the press at its edge instead |
 | Leave a painted margin on an `Opaque` root | The layer surface's input region includes the margin: clicks, hover and keyboard focus land in shading that means nothing under it |
 | Expect the input region to bound the keyboard | A full-output layer keeps typing wherever its pointer region is empty, until it asks for `None` |
+| Time a double click in the app | The burst is the engine's, per button, on the desktop's own time and rectangle; a private timer disagrees with the system and with every other control |
 
 ## See also
 
@@ -289,6 +333,23 @@ and `EXCLUSIVE` then `ON_DEMAND` as it returns.
 - [Scroll Containers](./scroll.md): `SCROLL_OWNED` and the pan gesture.
 
 ## Corrections
+
+**A right press on a payload started no drag.** Arming the secondary gesture sat inside the
+`SECONDARY`-owner branch, so only a node that asked to hear the button could leave with the
+pointer; a row carrying files dropped its drag on the floor and, with no declared menu,
+nothing happened at all. The arming now asks the hit node for a drag owner on its own, and
+`SecondaryPress` records `node: None` when nobody reports the press, so the tap rule still
+holds the menu back. Caught by
+`a_secondary_press_on_a_payload_starts_a_right_drag` in
+`ui/crates/ui-platform/src/view/tests.rs`, which shows the tap taking no native drag and
+the threshold crossing taking one.
+
+**A drag entering a target asked for no frame.** `set_drag_target` returned only the app's
+answer to `DragEntered`, so an app that keeps no state — every app whose highlight reads
+`cx.drag_over_within` — never got the frame that would paint it, and the host kept the
+previous `drop_effect()` in front of the pointer. A target change is now a frame by
+itself. Caught by `a_drag_entering_a_target_asks_for_a_frame_by_itself`, driven with an app
+whose `changed` always answers `false`.
 
 **A pin's shadow swallowed clicks.** Every layer surface claimed its whole rectangle as input, so
 the 20 px margin a pin reserves for its shadow and hover ring took presses and hover meant for
@@ -309,6 +370,14 @@ to the layer under the surface. `collect_input_areas` now adds the panel. Caught
 `ui/crates/ui-platform/src/view/tests.rs`: a 200×200 `PassThrough` page with a one-row menu opened
 at `(50, 190)` publishes only `(0, 0, 200, 200)` without the panel, and a region containing
 `(150, 236)` with it.
+
+**The input-region special case was the symptom, not the fix.** Adding the painted menu rectangle
+to the union made that one click work, but the menu still had no node: no hover, no press, no
+`Change::Activated`, no popup surface. The menu is a declared panel now, so its rows are in the
+index and in the region like every other node, and `collect_input_areas` is back to the hit
+index's union alone. The old test's premise is gone with the special case; the invariant — a row
+past the owning node still takes the press — is `a_menu_reaching_past_its_node_still_takes_the_press_there`
+in `ui/crates/ui-platform/src/view/tests.rs`, which presses the row and expects the pick.
 
 **The screenshot overlay could not be dragged at all.** Its root senses `DRAG` and draws the
 frozen frame; a full-surface child painted the dimming bands and the selection border. That
@@ -414,3 +483,17 @@ rather than started inside message dispatch, which starts the system's move — 
 included — with a timer armed, so an animation keeps running while the window is dragged.
 `SC_SIZE` from the system menu and the system menu itself still block, because neither
 route goes through the loop that can arm a pump.
+
+**A double click existed for text only, timed inside the view.** The selection code carried
+its own 0.4 s and 4 px repeat rule, so no other control could see a second press: the picker
+documented that the engine reports no double-click and required select-then-accept, and a
+control that wanted "press twice to run" had to count in app state. The burst now belongs to
+the engine and is kept per button, measured against the desktop's double-click time and
+rectangle (Win32's `GetDoubleClickTime` and `SM_CXDOUBLECLK`, DPI-scaled; a scripted clock in
+tests), and a drag or a press outside either starts a new burst. It reaches controls as
+`WidgetState::clicks`/`cx.clicks_within`, `Change::Secondary`/`Middle { clicks }` and
+`FrameInfo::clicks`; text word selection now reads the same count instead of a private one.
+Caught by `a_press_joins_its_burst_only_within_the_desktops_gap_and_rectangle` in
+`crates/ui-platform/src/view/tests.rs` (red: a second press inside the rectangle was two
+separate clicks) and the picker's
+`a_double_click_opens_a_file_while_one_click_only_selects_it`.

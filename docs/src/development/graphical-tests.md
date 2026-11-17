@@ -42,6 +42,7 @@ pointer.
 | `GALLERY_FRAMELOG` | set | Prints each frame's CPU time and page |
 | `GALLERY_HEARTBEAT` | set | Prints a periodic liveness line |
 | `GALLERY_UNCAPPED` | set | Removes the one-frame-per-vblank gate |
+| `GALLERY_HOST` | set | Runs the app on the process loop instead of a one-window session |
 
 The gallery's language is a command-line argument, not a knob: pass
 `--locale auto` or `--locale <tag>`, and an unknown tag falls back to English.
@@ -66,6 +67,18 @@ All coordinates are in window pixels.
 | `GALLERY_TYPE` | text | Types the text into whatever holds the caret |
 | `GALLERY_RIGHT` | `x,y` | Opens the context menu a right click would |
 | `GALLERY_CLIPBOARD` | `copy:<text>` or `paste` | Seeds the clipboard or asks for it |
+
+## Platform panels
+
+Only `GALLERY_HOST=1` reconciles panels: a one-window session never does, so a
+page that asks for `Presentation::Platform` paints in the parent there. The
+menu-flyout page asks for one, and scripted input does not reach the host path,
+so the popup is opened by hand inside the nested session.
+
+`WAYLAND_DEBUG=1` is the evidence: the log shows `xdg_positioner.set_anchor_rect`
+with the trigger's rect, `xdg_surface.get_popup`, then an attach whose size is the
+menu's. A second `explicit sync unavailable` line also counts — each surface opens
+its own GPU presenter.
 
 ## Traps
 

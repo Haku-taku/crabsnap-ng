@@ -78,6 +78,11 @@ cannot fill a role says so instead of inventing a colour.
 
 - Read it with `colour`, `metric`, `colour_or`, `metric_or`. Use the `_or`
   form when a family pack may legitimately lack the value.
+- A surface that must *hide* what it covers reads `opaque_or`, not
+  `colour_or`: it resolves the role over `Surface` the way the system's own
+  compositor would. WinUI expresses `SurfaceRaised` as white at five percent —
+  a card tint meant to sit on a page — so taking it literally on a menu makes
+  the menu a veil over the rows behind it.
 
 Each system exports `pack()` and `pack_of(appearance)`. `pack()` is the light
 pack and is only correct for a surface that is deliberately theme-free; a page
@@ -201,6 +206,7 @@ new input that is not in `StyleScope` makes every cached entry silently stale.
 | Read `OnSurface` for ink over a frost | Contrast that assumes an opaque surface |
 | Call `pack()` in a page that follows the theme | The light pack's near-black text on the dark surface (and the reverse) |
 | Give a surface-owning control a fixed content ink | The card reads in one appearance and not the other |
+| Read `SurfaceRaised` on a menu or dialog | WinUI's five-percent card tint becomes a veil: the rows behind show through the surface |
 
 ## Corrections
 
@@ -209,6 +215,34 @@ new input that is not in `StyleScope` makes every cached entry silently stale.
 claim look true. In practice no production build writes `Decl::env`; a control
 that read the tree would find no scope at all. Scoping is per-build through
 `cx.at_scope`, and the environment chain is the only carrier.
+
+**A raised surface was read as if it were opaque.** WinUI's
+`CardBackgroundFillColorDefaultBrush` is white at five percent alpha: a card
+tint that the system composites over the page, not a colour. Reading
+`CommonColor::SurfaceRaised` literally made the picker's Fluent dropdown, and
+its dialog, a veil — the folder rows showed through the surface and the text
+over them could not be read (measured: `Surface` #202020 at alpha 255 against
+`SurfaceRaised` white at alpha 13). `Style::opaque_or` now resolves a covering
+role over `Surface` with `Color::over` (source-over, straight channels, the
+same blend the painter applies), so MD3 and Glass answer their own opaque
+values unchanged and Fluent answers the composited colour, about #2B2B2B. The
+fix is at the role read, not a special case in the picker: every menu or dialog
+that has to hide content asks the same question.
+
+**MD3's hover and pressed were container tokens.** The common plane's
+`SurfaceHover` and `SurfacePressed` were mapped onto `surface_container_high`
+and `surface_container_highest`. The picker's dialog is `SurfaceRaised`, which
+MD3 also answers with `surface_container_high`, so a hovered file row was
+painted in exactly the colour it already stood on and showed no highlight at
+all, in both appearances; on the sidebar the same token painted an opaque
+container block instead of a wash. Material states are state layers, not
+containers: the answers are now `on_surface` at the spec's 8% (hover) and 10%
+(pressed) opacities, carrying their source. The picker's hover fills fade that
+layer by alpha (`faded(lift).over(base)`) rather than lerping from transparent,
+which would drag the layer's own channels towards black on the way in.
+`the_state_layers_are_translucent_and_take_their_ink_from_on_surface` fails if
+either answer becomes opaque, and the picker demo shows the row highlight in
+both appearances.
 
 **The style cache was described as keyed by every input.** Its comment says
 the key is "every input that can change the result". The key is appearance,

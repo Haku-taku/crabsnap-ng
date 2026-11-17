@@ -80,10 +80,12 @@ startup, before the first frame; the provider enumerates the system stack
 separately.
 
 An app that opens its surfaces through `Host` does not hold a loop to register
-on: it declares the faces in `OpenOptions::fonts`, and the backend registers
-them on the surface's loop before the first frame. `crabsnap` ships the
-Material Symbols variable face that way, under `IconSet::Outlined`'s family
-name, because no Windows machine has it installed.
+on: it declares the faces in `OpenOptions::fonts` and the fallback order in
+`OpenOptions::stack`, and the backend registers them on the surface's loop
+before the first frame. `crabsnap` ships the Material Symbols variable face that
+way, under `IconSet::Outlined`'s family name, because no Windows machine has it
+installed. Without `stack`, text lays out against an empty chain and falls to
+whatever the host defaults to, however many faces were registered.
 
 ## When not to use a glyph
 

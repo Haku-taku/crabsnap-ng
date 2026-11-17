@@ -66,6 +66,7 @@ A host asks the engine for a surface with one description, `ui_platform::window:
 
 ```rust
 SurfaceSpec::window(app_id, title, size)
+SurfaceSpec::dialog(app_id, title, size)   // opened through its parent's surface
 SurfaceSpec::layer(app_id, namespace, LayerSpec { .. })
 ```
 
@@ -73,9 +74,14 @@ SurfaceSpec::layer(app_id, namespace, LayerSpec { .. })
 `SurfaceRole::Layer` is one the engine places: no decoration, no window-manager layout, and a
 stack level of its own. The vocabulary is `zwlr_layer_shell_v1`'s, which is also the one
 `gtk4-layer-shell` gives GTK apps: a level, four anchor booleans, a size, a margin, an exclusive
-zone and a keyboard mode. `SurfaceRole::Popup` is the third: a surface placed against a
-rectangle in another surface. The application never asks for one; the engine asks the backend
-when a popover declares `Presentation::Platform`.
+zone and a keyboard mode. `SurfaceRole::Dialog` is the third: a secondary window opened through
+the surface it belongs to, stacked above it and closed with it. Its modality, lifecycle and the
+host's input filter are [Dialog Surfaces](./dialogs.md)' contract. A popup is not a role: it is
+a `PopupSpec` a surface hands out through `SurfaceHandle::open_popup` when a popover declares
+`Presentation::Platform` ([below](#presentation-surfaces)). A panel declared with
+`Presentation::Window` reuses the dialog role as a modeless window of the surface it belongs to:
+same ownership and stacking, no `EnableWindow` and no modality hint
+([Presentation surfaces](#presentation-surfaces)).
 
 Only Wayland has the role as a protocol; a platform without layer surfaces takes the same spec
 and approximates it — an undecorated window placed from `anchor`, `size` and `margin`, kept at
@@ -144,7 +150,7 @@ each time.
 
 ## Presentation surfaces {#presentation-surfaces}
 
-> **Status:** Implemented on Wayland and Win32; run on neither. The engine/presenter
+> **Status:** Implemented on Wayland and Win32; run on Wayland. The engine/presenter
 > split is in place: `Host` owns an `Engine` per surface and a backend never
 > holds an app. A platform panel is opened through `SurfaceHandle::open_popup`,
 > shown by `AppLoop::present_panel`, and reported back as dismissed through
@@ -155,10 +161,15 @@ each time.
 > scene target to hand a panel to, so it refuses and the panel paints in its
 > parent; Win32 has no CPU presenter at all.
 >
-> Both paths are compile-verified only: Wayland for
-> `x86_64-unknown-linux-gnu` with and without `gpu`, Win32 on the host, and no
-> compositor and no desktop session have run a panel yet. Driving a gallery page
-> with a platform panel is what would turn this into a runtime claim.
+> One Wayland panel has run: the gallery's menu-flyout page declares its Fluent
+> flyout with `Presentation::Platform` when `GALLERY_HOST=1`, and a nested
+> Hyprland session opened it as an `xdg_popup` — trace evidence is a positioner
+> sized 178×216 and anchored to the trigger's rect, `xdg_surface.get_popup`, and
+> then an attach of 178×216 on the popup's own `wl_surface`. Still unrun: a panel
+> ended by the platform's grab or `PopupDone`, a `reconfigure`, and a panel nested
+> in another panel. `picker_demo` uses the Win32 popup path for its menus and the
+> modeless-window path for its Properties and failure windows, which is the visual
+> check for both; the Wayland counterparts stay compile-verified only.
 
 The engine (`AppLoop` today) owns the application, its declaration tree, the
 clock, the focus and the hit index. A presenter owns one native surface, its
@@ -197,20 +208,37 @@ panels once per build into separate lists; `pump` and a per-scope `present`
 fold into `step` until a presenter outlives its subtree.
 
 `Presentation::Parent` is the default: the panel is painted into its parent's
-surface. `Presentation::Platform` asks for a surface of its own:
+surface. `Presentation::Platform` and `Presentation::Window` ask for a surface
+of their own:
 
 ```rust
 OverlayPlacement {
-    presentation: Presentation::Platform,
+    presentation: Presentation::Platform, // a popup, placed by the engine
+    ..
+}
+OverlayPlacement {
+    presentation: Presentation::Window,   // with `Decl::window_title(..)` on the panel
     ..
 }
 ```
 
+A `Platform` panel is a popup: the platform holds it at the rect the engine
+placed against the output, and a press outside dismisses it. A `Window` panel is
+a modeless window owned by the surface the panel is declared in — the dialog
+role, without modality. The platform decides a modeless window's place, so the
+panel's rect supplies the client size and `Decl::window_title` supplies its
+name; the engine still needs the rect's origin to map the surface's input back
+into the tree, which is why a window panel is laid out exactly as a popup is.
+
 The engine reconciles the request against the presenters it has open. A new
 declaration opens one, a vanished declaration closes it, and a moved anchor
-repositions it. Closing is immediate: a platform panel has no exit animation
-until a presenter can outlive its subtree, which the binding table does not do
-yet.
+repositions it. A popup takes the engine's rect. A window takes only its size: a
+backend pins the window to that size — Win32 a dialog frame without a sizing
+border, Wayland the toplevel's minimum and maximum both — so content that grows
+or shrinks resizes the window, and the user is offered no resize that would
+leave a blank strip beside the panel. Closing is immediate: a platform panel has
+no exit animation until a presenter can outlive its subtree, which the binding
+table does not do yet.
 
 ### Sizing and placement
 
@@ -359,10 +387,13 @@ Nothing activates: the window is `WS_EX_NOACTIVATE` and answers `MA_NOACTIVATE`,
 so the keyboard stays with the owner and the engine routes keys into the panel's
 focus scope. That is why a panel needs no input method of its own.
 
-Windows has no positioner, so the backend applies `Constraint` against the
-monitor's work area itself, with the engine's rule: flip first, slide after,
-never resize. The work area is converted into the owner's client space before
-`place_popup` runs, and the result back into screen pixels.
+Windows has no positioner, so the backend names the output instead: the monitor's
+work area in the surface's client coordinates goes to the engine
+(`AppLoop::set_output_bounds`), which places every platform panel with the same
+rule a positioner would apply — flip first, slide after, never resize. The
+window then opens at `PopupSpec::rect` unchanged. Moving it after layout would
+leave the tree's rectangles where the user is not looking, and the grab routes
+every press outside the panel into that tree.
 
 ### Input
 
@@ -400,7 +431,7 @@ surface yet, so text entry works in the root window only.
 | `ui-platform/src/host.rs` | one engine per group, the binding table (open, reconfigure, dismiss, fall back), nested rebase |
 | `ui-platform-wayland/src/window.rs` | `create_popup`, `reposition_popup`: `xdg_popup` and `xdg_positioner`, the grab serial, the side/align-to-anchor/gravity mapping |
 | `ui-platform-wayland/src/session.rs` | presents one surface; holds no `AppLoop`; `PopupPresenter` shows a panel, shifts its input, repositions it, and refuses on the CPU presenter |
-| `ui-platform-win32/src/window.rs` | `new_popup` and `move_popup`: the owned window, `SetCapture`, the placement carried on the owner's move, the work-area constraint |
+| `ui-platform-win32/src/window.rs` | `new_popup` and `move_popup`: the owned window, `SetCapture`, the placement carried on the owner's move, the monitor's work area the engine places panels against |
 | `ui-platform-win32/src/session.rs` | presents one surface; holds no `AppLoop`; `PopupPresenter` shows a panel, shifts its input, and moves it |
 
 ### Verification
@@ -410,6 +441,10 @@ flip before slide, slide when flipping is refused, a panel larger than the
 bounds pinned to its origin, `NONE` leaving the request alone, an aligned panel
 flipping its alignment at the right edge, and a centered panel sliding because
 it has no other alignment. Each was watched failing with its branch disabled.
+The rule is now `ui_core::layout::place_anchored`; `place_popup` maps a
+`Constraint` onto it, and the layout runs it for a platform panel with the
+output the host named. `a_platform_panel_unfolds_inside_the_output` pins that
+the layout applies it.
 
 The split is pinned by five tests. `a_platform_panel_keeps_its_preferred_position_and_is_recorded`
 in `crates/ui-core/src/layout_engine/tests.rs` drives a panel past a small
@@ -545,6 +580,60 @@ logical sizes and stayed mapped, each through its own queue.
 
 ## Corrections
 
+**A Win32 popup was slid away from the tree's rectangle, and the grab made the tree
+believe the moved positions.** The tree placed a menu's flyout beside its row; `popup_rect`
+then ran `place_popup` against the monitor's work area again. A flyout 823 px tall with less
+room below the menu was slid up by 746 px: the window painted the panel at the new place,
+while the tree's rectangles stayed beside the row. A popup keeps the mouse capture, so every
+move outside its window still arrives at its presenter, and the presenter shifts it by the
+panel's tree origin — a position the user was not looking at. Moving back onto the parent menu
+reported a point 746 px below it, so no row left its hover and the flyout never closed;
+pressing near the flyout's left edge mapped outside every level and the whole menu dismissed.
+The tree now owns placement: the host names the monitor's work area as the output, the layout
+applies flip-then-slide, and `popup_rect` opens the window at `spec.rect` unchanged. Caught by
+`a_platform_panel_unfolds_inside_the_output` plus the recorded probe log of the run that showed
+`origin (768.1, 643.8)` receiving `PointerMoved (-60, 746.4)` while the cursor stood on the
+parent row.
+
+**A panel's window also acted on the parent's input.** Running the first platform panel showed
+the menu's hover lighting and going out as the pointer moved, with the page's nav row lighting
+instead. Both surfaces bind their own `wl_seat`, and a seat delivers pointer and keyboard events
+to every proxy bound on the connection, so the popup's presenter dispatched each event shifted
+by its own origin while the parent's dispatched the same event unshifted — into the same tree.
+`WindowState::surface` now gates `enter`/`leave` on both devices and the events that name no
+surface (`motion`, `button`, `key`, `modifiers`) ride `pointer_over`/`keyboard_focus`, which only
+a matching `enter` sets. Caught by moving the pointer over the popup in a nested session: the
+parent's nav item lit up at the popup-local coordinates `(62, 92)`.
+
+**An acrylic panel painted nothing.** `MenuFlyoutPresenterBackground` is
+`DesktopAcrylicTransparentBrush` (`#00000000`); in a window the acrylic pass *is* the background.
+On a surface of the panel's own there is nothing behind it, so the pass shaded transparent black
+and the menu showed only its glyphs. A material now names what to paint where no backdrop can be
+sampled — WinUI's `AcrylicFallbackColor` reaches `Acrylic::fallback`, and `paint_panels` draws
+that fill instead of recording a backdrop entry, because a panel list has no window behind it.
+Glass names no fallback and keeps its declared fill. Caught by looking at the same popup: the
+rounded panel and its border appeared the moment the fill was painted, and the hover row stopped
+being the only thing on screen.
+
+**A pointer that crossed into a panel erased the tree's hover.** A row lit for a frame and
+went out as the pointer moved, and no row was lit once it stopped. Every build recomputed the
+hover from the frame's pointer argument, and the window's argument is its own surface's pointer
+— `None` while the pointer is on the panel — so each frame the window built cleared the hover
+the panel's motion had just set, and the last of those frames is the one left on screen.
+`build_step` now keeps the tree's own pointer when the surface supplies none: one tree, one
+pointer, whether the surface under it is the window or a panel. Caught by warping the pointer
+onto the popup and screenshotting: the row went out a frame after it lit.
+
+**A surface that still held the last pointer position hid the pointer that arrived.** After
+the fix above, crossing onto the popup still built the frame without hover: the window's
+`pointer_over` was still true on the enter batch, so `SurfaceHandle::pointer()` reported the
+place the pointer last stood on the window, and the hint the panel's motion had just made won
+over the crossing frame's own build. The group now reads its panels' queues before the build,
+asks the panels first for the pointer (their intake is this turn's), then the window — whose
+queue its own step reads later, so its answer is stale — and hands the build a hint the
+surface's own sample may still override. Caught by warping the pointer out of the popup and
+back in: the row lit only after the pointer stopped until the panel's answer was asked first.
+
 **Dropping one window deleted another window's GL objects.** The pin's ids collide with the
 overlay's, because both are the first objects a fresh context names. `GpuWindow::drop` deleted
 them while the *pin's* context was current — the pin's targets, programs and buffers were gone
@@ -637,13 +726,23 @@ answers `MA_NOACTIVATE`. The owner keeps the keyboard, the engine routes the key
 popup's scope, and nothing but pixels and the pointer crosses the window boundary. Text input
 inside a panel is the price: neither backend gives a panel an input method yet.
 
+**The Win32 floor was read at the system DPI.** `tracked_minimum` called `GetSystemMetrics` for
+`SM_CXMINTRACK`/`SM_CYMINTRACK`, and in a per-monitor-aware process that call answers for the
+system DPI, not the window's monitor. On a scaled display the floor it returned was smaller than
+the shell's own, so the window could be dragged under the frame's minimum and the declared
+client floor lost a few logical units per step. The same function now reads
+`GetSystemMetricsForDpi` with `GetDpiForWindow`. Derived from Microsoft's documented behaviour of
+the two calls; the unscaled case is unchanged, which is what `resize_probe` still checks.
+
 ## Status
 
 Implemented: toplevel and layer-shell surfaces, shm and dma-buf presentation,
 explicit sync when the compositor offers it, configure-driven resize,
 fractional scaling, keyboard and IME through Wayland protocols, colour
 management where available, and lending the connection to application
-protocols through `WaylandLink`. On Windows, a decorated window and a layer
+protocols through `WaylandLink`. Dialog surfaces are [their own page](./dialogs.md):
+a toplevel with a parent, plus `xdg-dialog` where the compositor carries it.
+On Windows, a decorated window and a layer
 approximated as a topmost popup are behind the same spec: the popup takes
 clicks only where its frame consumes them, gives up the monitor edge an
 auto-hidden taskbar hides behind unless the spec asks to cover it, and hands
@@ -652,24 +751,33 @@ the keyboard back when a pointer-following surface is left; see
 
 Partial: the engine/presenter split — `Host` owns an `Engine`
 (`AppLoop<Box<dyn App>>` per surface, one `SurfaceHandle` per presentation) and a
-backend holds no app. `PopupSpec`, `Constraint` and `place_popup` — the
-constraint maths a platform without a positioner runs — are unit tested.
+backend holds no app. `PopupSpec` and `Constraint` are unit tested, and the
+constraint maths a platform without a positioner needs is now the layout's
+`place_anchored`, which the engine runs itself.
 
 Platform popup surfaces on Wayland (GPU presenter only; the CPU one falls back
-to its parent) and on Win32 (an owned, non-activating window with the mouse
-captured). Nested panels hang off the outer popup on both. Compile-verified,
-not run on either platform.
+to its parent) have run: the gallery's menu flyout opens as an `xdg_popup` at
+its trigger and closes on an outside click. Win32's owned, non-activating
+window with the mouse captured is compile-verified only. Nested panels and a
+popup that repositions are unrun on both.
 
 Planned: the `Host` split into separate presenters that a panel surface
 outliving its subtree needs.
 
-Not implemented: hover joined across surfaces; text input in a popup surface;
-macOS and X11 windows; multi-seat input; tablet and touch protocols beyond the
-pointer path.
+Not implemented: text input in a popup surface; macOS and X11 windows;
+multi-seat input; tablet and touch protocols beyond the pointer path. A pointer
+that moves between surfaces of one group is followed — the tree keeps one
+pointer — and the frame it crosses builds with it: the host reads the panels'
+queues before it builds the group's frame, resolves the one pointer the
+surfaces share, and hands it to the build as a hint the surface's own sample
+may override. Pinned by `a_pointer_crossing_between_surfaces_reaches_the_frame_it_builds`
+in `crates/ui-platform/tests/host_loop.rs`.
 
 ## See also
 
 - [Rendering Backends](../rendering-backends.md): buffer pools and explicit
   sync.
+- [Dialog Surfaces](./dialogs.md): a secondary window, its modality and its
+  lifecycle.
 - [Colour and HDR](./colour.md): the output description this backend reads.
 - [Frame Pipeline](./frame-pipeline.md): what runs after the callback arrives.

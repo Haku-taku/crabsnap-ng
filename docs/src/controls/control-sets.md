@@ -35,6 +35,13 @@ Use them before writing a fourth button:
 - A family-specific control keeps its own module and spec table; do not
   add family branches to a shared control.
 
+`Styled` completes a control's disabled look. A control that paints its own disabled colours
+reports `handles_disabled` and is left alone; every other control is faded as one group to
+38%. That flag is folded from the declaration the build just produced plus the inertness its
+containers declared while building it, never from the committed routing, which describes the
+previous frame. A caller-drawn declaration placed through `Pressable` opts in with
+`painted_disabled()` when it resolves its own disabled colours.
+
 ## What each crate also contains
 
 Structural modules sit beside the controls and are not controls themselves:

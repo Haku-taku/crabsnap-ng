@@ -73,8 +73,11 @@ the bytes: a collection or variable file holds several faces, and parsing
 byte zero always yields the first.
 
 `register_family(name, bytes)` admits a bundled font and wins over a
-system family of the same name. `face_data` hands the raw bytes to the
-rasterizer.
+system family of the same name. A name whose bytes were already admitted is a no-op: the
+database is shared per thread and keeps every admission for the process, so the next surface
+handing over the same file must not add a second. Bytes that differ get an internal family
+name of their own, because fontique can append a family but not drop one. `face_data` hands
+the raw bytes to the rasterizer.
 
 One provider exists, `FontiqueProvider`, over fontique's per-platform
 backends. There are no per-platform provider crates.
@@ -214,6 +217,17 @@ and the base stack takes that face ahead of the plain sans; the same measurement
 `Segoe UI` for the UI slot and for the stack, `Arial` only for the sans. Pinned by
 `the_default_style_shapes_in_the_platforms_ui_face`, watched red with the base stack back on the
 plain sans — face 14 where the UI slot's face 0 belonged.
+
+**A bundled font was admitted again by every surface, so each window kept its own copy.** The
+provider is shared per thread, but `register` went straight to fontique, which appends another
+face — and another reference to the whole blob — to a family it already knows, keeping both for
+the process. A picker that registers its interface and icon fonts on every open therefore grew
+about 11.6 MB per window: `MaterialSymbolsOutlined.ttf` is 10.7 MB and `InterVariable.ttf` 0.9 MB.
+Three open/close cycles of `picker_demo`, each closed and left idle past the picture caches'
+window, measured 41.0 → 73.4 → 87.4 → 100.0 MB. Registration is now idempotent: the same bytes
+under a known name are a no-op, and different bytes get an internal family name so a genuine
+replacement still takes effect. `registering_a_family_again_keeps_one` pins the first half and
+was watched red at two faces where one belonged.
 
 ## Status
 

@@ -243,6 +243,23 @@ the node may never come back.
 canvas, opens a field from that build, and types into it on the frame after: it
 fails on the focus assertion when the applied request is removed.
 
+## Caret and blink
+
+The caret a build declares is a frame fact, not a value the app tweens. `CaretFact` names the
+editing input and its byte offset, or the read-only selection's two ends; the engine compares
+it at the start of every frame and `next_wake` reports the blink's next phase, so a surface
+with a caret wakes on its own. `CARET_BLINK` is half a second lit and half dark, measured from
+the cycle's start, and every frame paints from that clock.
+
+What restarts the cycle is the editor and its buffer, not the caret's position. A field that
+takes the keyboard opens lit, an edit restarts the cycle (typing shows a solid caret, as
+text fields everywhere do), and focus moving to another input starts a new one. A caret
+walked with the arrow keys inside one buffer keeps the phase it had: the blink is the
+user's signal that the field is alive, and restarting on every step would make a held arrow
+key draw the caret solid — the opposite of a blink. The engine therefore remembers the
+focus owner together with a digest of its input's buffer and restarts only when either
+changes.
+
 ## Faces and fallback
 
 - `FaceId` identifies a **face instance**, not a family: variable-font axes
@@ -924,6 +941,16 @@ the range keeps the old behaviour. Caught by
 `a_press_inside_the_selection_carries_its_text_out_as_a_drag`, which compares the payload with
 `selected_text` and the image's width with the selection's rather than the block's.
 
+**A caret walked with the arrow keys stopped blinking.** Every change to the frame's caret
+fact restarted the blink clock, and an arrow step changes the offset, so a caret moved by the
+keyboard stayed lit for as long as the keys kept moving: held arrows read as a solid bar, and
+only a pause of over half a second showed the dark half. The restart now looks at the editing
+owner and at a digest of its buffer; an offset change inside one buffer keeps the phase, an
+edit restarts it, and a caret arriving in another input starts a new cycle. Caught by
+`a_caret_walking_with_the_keys_keeps_blinking` in `crates/ui-platform/src/view/tests.rs`,
+which walks the caret seven times across the half-second mark and then reads the phase
+(red: the caret was still lit at 0.8 s).
+
 ## Traps
 
 | Change | Symptom |
@@ -965,6 +992,22 @@ snapped to character boundaries and never longer than the limit; an anchor outsi
 clamps to its edge. Caught by
 `the_demo_documents_ime_surrounding_text_fits_one_request` in
 `crates/ui-widgets/tests/demo_doc.rs`, which read 9929 bytes before the change.
+
+**A truncated line lost its text to the ellipsis's byte offsets.** A line capped
+by `max_lines` ends short, and the painter appends `…` to the string it hands
+the shaper. `shape_line` clamped spans, runs and pieces against that appended
+string while its offsets are the block's: when the block's end fell one or two
+characters before the cut — a narrow picker cell holding `Captures` — the clamp
+landed inside the three-byte ellipsis, `str::get` refused the slice as not a
+character boundary, the piece shaped no glyph, and the primitive stayed
+unresolved. The GPU paints nothing for an unresolved prim and the CPU fallback
+paints a placeholder bar, so the whole name vanished rather than truncating.
+Shaping now takes the body's length beside the appended line, clamps every piece
+to the body's end, gives the ellipsis its own piece in the style of the text it
+replaces, and draws no caret boundary at it since it stands at no source byte;
+pinned by `a_truncated_line_shapes_its_body_and_its_ellipsis`, whose layout is
+cut one character short and which read a bar-less empty glyph list with the old
+clamp restored.
 
 ## Status
 

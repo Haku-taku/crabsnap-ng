@@ -20,7 +20,12 @@ without their reasons.
 | Liquid Glass | Apple HIG plus the two local glass implementations |
 | GPU presentation, damage, effects | Skia sampling and filters, GPUI's wgpu backend, egui's tessellator, `wayland.xml`, wlroots |
 | Hit testing and input routing | egui `Sense`/`interact`, GPUI's per-layer hit test |
+| Dialog windows and modality | `xdg-shell` `xdg_toplevel.set_parent`, `xdg-dialog-v1` `set_modal` (staging); Win32 owned windows and `EnableWindow`; macOS `NSWindow.beginSheet`; GTK `GtkWindow:transient-for`/`:modal` and `QDialog` for the same split |
 | System tray | Win32 `Shell_NotifyIcon` and `NOTIFYICONDATA` (the version 4 callback layout), Qt `QSystemTrayIcon` and its `org.kde.StatusNotifierItem` adaptor, Electron `Tray`, tray-icon's Windows implementation |
+| File thumbnails | the freedesktop Thumbnail Managing Standard (cache layout, `Thumb::` chunks), `.thumbnailer` desktop entries, gnome-desktop's `gnome-desktop-thumbnail.c` and kio-extras' `thumbnail/thumbnail.cpp` as the two reference readers, Win32 `IShellItemImageFactory::GetImage` and its `SIIGBF_*` flags, Apple Quick Look Thumbnailing |
+| File type icons | the freedesktop icon theme specification (`index.theme`, `Inherits`, size and scale directories), shared-mime-info's icon naming, Nautilus' `nautilus_file_should_show_thumbnail()` and `nautilus-icon-info.c`, KIO's `PreviewSettings`, Win32 `SHGetFileInfoW` and `SIIGBF_ICONONLY`, `NSWorkspace.icon(for:)` |
+| File operations, DnD and file menus | Dolphin/KIO `dropjob.cpp`, `renamedialog.cpp`, `paste.cpp` (`application/x-kde-cutselection`) and `FileUndoManager`; Nautilus' conflict dialog and clipboard source; Explorer's `IContextMenu`/`IFileOperation` docs and shell clipboard formats (`CF_HDROP`, `Preferred DropEffect`); `IExplorerCommand`/`IExplorerCommandProvider` and the `windows.fileExplorerContextMenus` manifest extension; Wayland `wayland.xml` `wl_data_source`/`wl_data_offer` (`copy`/`move`/`ask`, source deletes on `dnd_finished`); the freedesktop Trash Specification 1.0 |
+| File pickers | GTK 4 `GtkFileChooserWidget`, `GtkFileSystemModel`, `GtkSortListModel`, `GtkPlacesSidebar`; KIO `KFileWidget`, `KCoreDirLister`, `KFilePlacesModel` and Dolphin's `KFileItemModel`; Win32 `IFileOpenDialog` and `COMDLG_FILTERSPEC`; `NSOpenPanel`; `org.freedesktop.portal.FileChooser` v4 |
 | Ownership, sharing, copies | GPUI `SharedString`, egui `Arc<Galley>`, Bevy `RenderAsset`, rowan, cosmic-text `ShapeBuffer`; the rules are in [Ownership and Copies](../conventions/ownership.md) |
 
 ## Local copies
@@ -36,6 +41,7 @@ On this machine, already downloaded — no network needed:
 | GTK 4 layout contract | `/usr/include/gtk-4.0/gtk/gtklayoutmanager.h` |
 | Qt 6 layout contract | `/usr/include/qt6/QtWidgets/qlayoutitem.h` |
 | Qt 6 tray contract | `/usr/include/qt6/QtWidgets/qsystemtrayicon.h`, `/usr/include/qt6/QtGui/6.12.0/QtGui/private/qstatusnotifieritemadaptor_p.h` |
+| Thumbnailer entries and a populated cache | `/usr/share/thumbnailers/*.thumbnailer`, `~/.cache/thumbnails/{normal,large,x-large,xx-large,fail}/` |
 
 Widget reference clones live in `~/git/widget-ref/`: `flutter` (sparse:
 `painting`, `material`, `animation`), `fluent_ui`, `winui`,

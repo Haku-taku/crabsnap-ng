@@ -88,7 +88,7 @@ pub struct Session<A: App> {
     lp: AppLoop<A>,
     win: Win32Window,
     pace: Arc<FramePace>,
-    // atlases, pointer, closed, supersample
+    // pointer, closed, supersample
 }
 ```
 
@@ -100,6 +100,12 @@ device and chain, and presents each chain when that chain's frame-latency event
 says it can take a frame, so a window that is not ready costs the others
 nothing. A surface's `RenderThread` is a handle on that thread, not a thread of
 its own.
+
+The glyph pages belong to the renderer, not to the frame. A packet carries a page
+only when the renderer reports holding a different version, and the renderer records
+the version only once the upload landed; the loop keeps no record of its own. A frame
+the GPU thread supersedes before drawing therefore leaves its page owed, and the frame
+that replaces it carries the page again.
 
 `split()` exists for hosts that genuinely need cross-layer access (clipboard
 routing, scripted input). It is not a general escape hatch.
@@ -140,6 +146,18 @@ chain now. See the correction entry in
 [Rendering Backends](../rendering-backends.md) for the measurements and for the
 wait that keeps one window's blank off another's thread.
 
+**A glyph page was lost with the frame that carried it.** The loop recorded an atlas
+version as delivered when it built the packet, so a frame the GPU thread never drew
+still counted as one the renderer had. While scrolling or dragging, a host turn that
+dispatched input drained a pace whose completion signal was still set from the frame
+before, which re-opened the gate; the loop then built a frame over the one in flight,
+and the replaced packet took its page with it. The renderer kept sampling an older
+page: the reported file list showed glyphs missing inside their advances on the rows
+scrolling had just revealed, until new text happened to raise the version again. The
+renderer now reports the pages it holds and the loop compares against that, and a
+drained signal no longer opens the gate;
+`a_signal_from_the_previous_frame_does_not_open_the_gate` pins the pacing half.
+
 ## Traps
 
 | Change | Symptom |
@@ -150,6 +168,7 @@ wait that keeps one window's blank off another's thread.
 | Reorder `Session` fields | Teardown touches the surface after the objects that depend on it |
 | Present with an empty damage list every frame | Wasted commits; the compositor never settles |
 | Give each surface its own render thread | Two device stacks race in one process; the crash lands anywhere |
+| Record an atlas version when the packet is built | A superseded frame takes the page with it, and its glyphs stay missing |
 
 ## See also
 

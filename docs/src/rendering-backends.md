@@ -326,8 +326,10 @@ and not MIME types: text is `CF_UNICODETEXT`, `text/html` is `"HTML Format"` wit
 offsets around a marked fragment, `text/uri-list` is `CF_HDROP` with the `file:` URIs
 percent-decoded into wide paths, and `image/png` is `"PNG"` beside `CF_DIBV5` and `CF_DIB` —
 the formats Explorer, Word and Paint read, built by decoding the PNG, since a DIB is pixels.
-A MIME type with no Windows equivalent is refused rather than invented. A paste into an
-editor is still text only, because `Event::Paste` carries a string.
+A MIME type with no Windows equivalent is refused rather than invented. A file list is
+`CF_HDROP` plus the registered `Preferred DropEffect` (`DROPEFFECT_MOVE` for a cut), and a
+paste reads the list back as `ClipboardContent::Files`: a text field still takes only the
+text variant, while a file list lands in the app as paths.
 
 A command reads the clipboard through the process `Backend`, so `pin add --clipboard` asks
 the backend's `SelectionReader` what the copy offers and for one of those MIME types. The
@@ -1244,6 +1246,18 @@ Live on Windows: a screenshot taken mid-drag shows the target's highlight and hi
 already painted, and the card's rounded corners show the panel behind the drag rather than
 the page its rectangle covered.
 
+**The drag pump was never armed.** Every step installs the surface's move-loop pump in the
+thread's timer slot before it runs, because a caption press inside the step opens the shell's
+own move loop; `dnd::begin` then asked for the same slot and was refused, so OLE's loop
+dispatched `WM_TIMER` to a pump that steps other surfaces and never drains the target's
+phases. The surface kept the frame it started the drag with, and a drop target's highlight
+could not appear — the engine side had the fact, the host never built a frame that read it.
+The slot now records a *standby* pump: `attach` marks it, `WM_ENTERSIZEMOVE` promotes it, and
+`arm` may displace a standby but never an active loop. A phase queued for the pump is also
+left in the queue until `can_draw` is open, so no tick consumes one it cannot draw. Caught in
+the engine by `a_drag_entering_a_target_asks_for_a_frame_by_itself` and the picker's
+`an_incoming_drag_lights_the_panel`; the pump tick itself still needs a live drag to observe.
+
 **A title-bar drag stopped every frame in the process.** The press went to `DefWindowProcW`,
 whose move loop runs on this thread and returns only when the window is dropped; the engine
 was left showing its last frame for the whole gesture, and an animation in the client area
@@ -1302,8 +1316,9 @@ frame is on the GPU. `Present(1)` on the render thread returns at the compositor
 paces the app now — 271 fps per animating window against a 275 Hz output. Uncapped mode
 presents with `Present(0)` and keeps the loop's old block by making the hand-over itself
 wait for the frame in flight. The thread also takes the device-lost rebuild, the display
-change, the supersampling change and the readback for a dump; after a rebuild it asks for
-both atlases again, because the new device holds none of them. Teardown joins the thread
+change, the supersampling change and the readback for a dump; the renderer reports which
+glyph pages it holds, so a rebuild — and any frame the thread never drew — leaves its page
+owed and the next frame carries it again. Teardown joins the thread
 before the window is destroyed, since the chain outlives nothing else.
 
 Measured with the gallery's border harness (200 moves, 2 px every 2 ms), the window-rectangle
@@ -1431,6 +1446,15 @@ about 500 frames a second over two windows, and a move onto another output chang
 period with it. Two surfaces on one thread still cost each other the time the other spends
 drawing, so the pair lands a little under twice the rate; that is the single GPU thread's
 own cost, and the rate stays one the display can show.
+
+**A surface kept its frame-latency handle open for the life of the process.**
+`IDXGISwapChain2::GetFrameLatencyWaitableObject` returns a handle the caller owns, and its
+documentation asks for `CloseHandle` once the caller is done with it; the presenter stored
+the handle to wait on and never closed it, so every window left one behind — `picker_demo`
+held 1227 handles while browsing and gained about two per open/close cycle. `Drop for
+Win32Presenter` closes it now, on whichever thread drops the presenter (with a render thread,
+the GPU thread, between its waits). A handle is bytes, not megabytes, but a sync object DXGI
+opened outlives the chain until the handle goes, so the demo's handle count is the check.
 
 ## Status
 
