@@ -656,6 +656,7 @@ fn open_overlay(
                 .settings
                 .shortcuts
                 .chords(crabsnap_core::hotkeys::Place::Overlay),
+            ..OpenOptions::default()
         },
     )?;
     service.overlay = Some(id);

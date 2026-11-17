@@ -1228,7 +1228,7 @@ impl Toolbar {
         match change {
             ui_core::change::Change::DragStarted => self.begin(),
             ui_core::change::Change::Moved { dx, dy } => self.moved(*dx as f32, *dy as f32),
-            ui_core::change::Change::Dropped(_) => self.drop(),
+            ui_core::change::Change::Dropped { .. } => self.drop(),
             ui_core::change::Change::Cancelled => self.cancel(),
             _ => return false,
         }

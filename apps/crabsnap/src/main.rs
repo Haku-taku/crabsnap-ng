@@ -1194,7 +1194,7 @@ impl App for PinCanvas {
     fn changed(&mut self, id: Id, change: ui_core::change::Change) -> bool {
         // The canvas owns the secondary button for its pins: the loupe belongs to the pin
         // under the pointer, and only the next build knows which one that is.
-        if let ui_core::change::Change::Secondary { down } = change {
+        if let ui_core::change::Change::Secondary { down, .. } = change {
             self.secondary = down;
             return true;
         }
@@ -1747,13 +1747,13 @@ impl App for Overlay {
     fn changed(&mut self, id: Id, change: ui_core::change::Change) -> bool {
         match change {
             // The secondary button holds the loupe up; the release puts it away.
-            ui_core::change::Change::Secondary { down } => {
+            ui_core::change::Change::Secondary { down, .. } => {
                 self.loupe.set_held(down);
                 return true;
             }
             // The middle button moves the selection: a press inside it is otherwise the
             // annotation canvas's, so the button has no meaning of its own to take.
-            ui_core::change::Change::Middle { down } => {
+            ui_core::change::Change::Middle { down, .. } => {
                 self.middle = down;
                 self.middle_offered = false;
                 return true;
@@ -1762,7 +1762,7 @@ impl App for Overlay {
             // drags are the root's.
             ui_core::change::Change::DragStarted
             | ui_core::change::Change::Moved { .. }
-            | ui_core::change::Change::Dropped(_)
+            | ui_core::change::Change::Dropped { .. }
             | ui_core::change::Change::Cancelled => return self.toolbar.dragged(id, &change),
             _ => {}
         }
@@ -2608,6 +2608,7 @@ pub(crate) fn show_pins(
             images: entries,
             shortcuts: settings.shortcuts.chords(crabsnap_core::hotkeys::Place::Pin),
             fonts: vec![fonts::icon_face()],
+            ..OpenOptions::default()
         },
     )?;
     let start = Instant::now();
@@ -2719,6 +2720,7 @@ fn shoot_region(
                 sampling: ui_core::draw::Sampling::Smooth,
             }],
             shortcuts: overlay_chords,
+            ..OpenOptions::default()
         },
     )?;
     println!("overlay {width}x{height}");
