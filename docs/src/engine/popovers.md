@@ -112,7 +112,7 @@ declared after it, regardless of declaration order.
   panel rectangle and the press position, so it emits a payload-free
   `Change::Dismissed` to the panel's root. The app decides whether to obey.
   A platform panel can also be dismissed by its window server — a Wayland
-  `popup_done`, a Win32 capture changing. The host reports that with
+  `popup_done`, a Win32 capture the system released. The host reports that with
   `AppLoop::dismiss_panel`, which fills the same `dismissed` slot an outside
   press does, so `cx.dismissed()` and the `Change::Dismissed` a control derives
   from it answer either cause.
@@ -343,6 +343,22 @@ only the ticket the read asked about. Pinned by
 `a_shell_read_that_answers_late_joins_the_open_menu` in `crates/ui-picker/src/picker.rs`: a
 read that is silent through the wait opens the menu without a "Shell Menu" row, and the answer
 that follows must hand the open menu a `MenuUpdate` that carries it.
+
+**A menu closed the moment its own panel opened.** The Win32 popup read every
+`WM_CAPTURECHANGED` whose gainer was not itself or one of its own popups as a takeover and
+closed. A press delivered to a background thread leaves that thread's capture in the system's
+hands: the gesture that asked for it ends it, and the change arrives with a null `lParam` — no
+window took the pointer, so nobody is dismissing anything. The log showed exactly that on a
+right-click on a pin: the panel opened at (1281,721)-(1400,957) holding the grab, and a change
+with no gainer followed in the same turn, so the menu was closed before it finished its
+entrance. A null gainer (and an own popup, which is the nested case already handled) now counts
+as kept. Separately, the menu's panels are declared by the engine, not the app, so
+`AppLoop::dismiss_panel` reported the dismissal under an id no app declares and the menu could
+stay up over a level whose surface was gone; the call now hands the id to `menu_dismissed` too,
+which closes the taken-back level. The
+engine half is pinned by `a_menu_panel_the_platform_took_back_closes_the_menu` in
+`crates/ui-platform/src/view_menu_test.rs`; the null-gainer rule needs a real window and a held
+grab, so it rests on this record and the manual check that a right-click's menu stays up.
 
 ## Traps
 
