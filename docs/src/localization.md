@@ -193,6 +193,17 @@ validated it on Save; it could not express "follow the system", and
 choice is one value with two states and the catalogue is resolved from it, so no
 binary reads a private environment variable for language.
 
+**The gallery and the picker demo still asked the environment.** Both examples called
+`ui_platform::posix_system_languages()` themselves. Launched from Explorer, a Windows session
+states no locale variable, so the list was empty and the picker came up English; launched from
+msys2, which exports `LANG=zh_CN.UTF-8`, the same binary came up Chinese — the report that
+started this fix. `Host::languages()` is the answer a running loop has, and the picker demo now
+reads it before it builds the env it hands `PickerOptions`. The gallery takes the list as an
+argument: its host path passes `host.languages()`, and the bare one-window session — which has no
+backend to ask — keeps the POSIX answer, which is the whole answer on a POSIX session. No test
+pins it, for the same reason as above; the check is launching the picker from Explorer on a
+system whose language is not English.
+
 ## Status
 
 Implemented on 2026-11-11. `ui-platform` reads the POSIX list; `ui-i18n`

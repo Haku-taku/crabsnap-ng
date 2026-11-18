@@ -287,6 +287,23 @@ colour-change slot and the MD3 authority; the MD3 controls keep their own
 constants as documented, and the table no longer contradicts them. Checked by
 `the_material_state_change_is_linear`.
 
+**WinUI's row states were control fills.** `SurfaceHover`, `SurfacePressed`
+and `SurfaceSelected` answered `ControlFillColorSecondary` and
+`ControlFillColorTertiary` — the alpha fills a control lays down as its own base
+over the page, not washes over a surface that already has one. Those light
+values are near-white, so over the picker's raised dialog the selected row
+measured #F9F9F9 against #FBFBFB: a 2/255 step, and a user could not tell a
+marked file from an unmarked one. Pressed and selected also named the same
+brush, so the two states were one colour by construction. Hover and pressed now
+use the subtle fill family (`SubtleFillColorSecondary`/`Tertiary`) that WinUI's
+own list and navigation rows use, whose light column darkens the page.
+Selection cannot come from that family: WinUI pairs its subtle selected fill
+with an accent indicator pill, which the common plane has no role for, so the
+answer is the accent (14%, the HIG convention's alpha) with its own
+`Convention` source; the row then reads as a tinted fill in both appearances.
+`a_selected_row_reads_against_the_row_it_marks` composites the fill over the
+dialog and fails below an 8/255 step — it measured 0.7 under the old mapping.
+
 ## Status
 
 Implemented: the ten-field snapshot and builder, the common plane with explicit

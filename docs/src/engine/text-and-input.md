@@ -426,6 +426,9 @@ visible. The vertical phase applies to them as it does to any other script.
   above. That needs an input method registered in process: an out-of-process one
   serves keys only through the window's IMM32 emulation, so it, and every other
   state, uses IMM32, which carries the preedit and the commit and nothing else.
+- A window with no field holds no input context on Windows: the backend takes it
+  away and keeps the `HIC` for the next field, and activation with no field
+  takes away any context an input method associated meanwhile.
 - A secret input sends no surrounding text and states `content_type` as
   `hidden_text | sensitive_data` with purpose `password`, so the method neither
   learns the value nor offers suggestions. Its previous neighbourhood is cleared
@@ -514,6 +517,20 @@ decide what it means.
   `LC_ALL`.
 
 ## Corrections
+
+**A window with no field kept an input context.** The Win32 backend treated
+`ImeState` as an open/close on the window's IMM context and never removed the
+context itself, so `ImmSetOpenStatus(false)` only closed it: the user's own
+input-method switch (Shift, Ctrl+Space, the method's status bar) opened it again
+on a window with nothing to type into, and the composition it built reached a
+tree that owned no field. The user saw it on a pin. The context is now
+disassociated while no field has focus — the `HIC` is kept on the window state
+and restored when a field takes focus — and an activated window takes none back
+while it has no field, whatever the method did while it was away. A TSF-attached
+frame disassociates IMM for the same reason: two paths to one composition is one
+too many. No unit test can hold an IMM context; the check is by hand — open a
+pin without a text field and press the method's toggle, and no composition
+window appears.
 
 **Pressing `Shift` mid-hold froze a held cursor key.** The window kept one repeating key,
 replaced on every `pressed` event by a snapshot of the events that press produced. A modifier

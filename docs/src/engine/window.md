@@ -112,6 +112,12 @@ which never reaches that loop. `resize_probe` checks both routes: the shell's an
 the declared window rectangle, and an inward drag of 240 by 160 pixels leaves the client area
 at the size it started from.
 
+A spec also says what the surface's colour follows: `with_colour(ColourPolicy::Auto)` lets it
+take its output's description, HDR included, and the default `Sdr` presents sRGB even on an HDR
+output. Interface content is authored in sRGB, so only a surface that draws light asks for
+`Auto`; the pipeline it then enters is [Colour and HDR](./colour.md). A panel inherits its
+parent's policy, because it is that surface's chrome.
+
 ## Layer placement and the keyboard
 
 A layer surface says where it goes through four booleans, a size, and a margin. With

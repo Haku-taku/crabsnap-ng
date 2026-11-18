@@ -5,10 +5,13 @@ supporting text and a trailing shortcut or icon. This page covers the box the
 export describes and the state model a row carries.
 
 The engine already paints one menu: a secondary click collects text rows and
-draws them through [`MenuStyle`], which MD3 supplies as `menu_style`. That
-menu is the engine's, and stays text-only. `Md3Menu` is the surface an app
-places itself, for a menu button, a split button's panel, or a command list
-inside a popover.
+draws them through [`MenuStyle`]. Each kit supplies that look as a
+`menu_style_of(appearance)` (MD3's is `menu_style`, resolved from
+`md.comp.menus`), which an app returns from `App::menu_style`; Fluent and Glass
+map their own menu materials onto the same fields, because a platform popup has
+nothing behind it to frost. That menu is the engine's, and stays text-only.
+`Md3Menu` is the surface an app places itself, for a menu button, a split
+button's panel, or a command list inside a popover.
 
 ## The box
 

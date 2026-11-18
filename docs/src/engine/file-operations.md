@@ -86,7 +86,9 @@ FileOperations::answer(id, decision)
 ```
 
 `OperationEvent` is `Progress { done_items, total_items, bytes_done, bytes_total,
-current_name }`, `Conflict { … }` or `Finished(OperationReport)`. The report carries
+current }`, `Conflict { … }` or `Finished(OperationReport)`. `current` is the source being
+worked on, as a path, so a view can point at it in the batch it started rather than match a
+name. The report carries
 `succeeded`, `skipped`, the items still undone after a cancel, and `failed:
 Vec<(PathBuf, OpError)>` with a portable error vocabulary: `NotFound`,
 `PermissionDenied`, `ReadOnly`, `AlreadyExists`, `CrossDevice`, `Recursive`,
@@ -496,16 +498,20 @@ already permits; everything needing `std::os` sits in a platform crate behind
 
 ### Feedback in the dialog
 
-The footer carries the operation:
+The footer carries the operation, and the band above it names the files:
 
-- While a job runs: "Copying 3 of 12 — 45%", the current name and a cancel button. One job
-  runs at a time; later requests queue in order.
+- While a job runs: "Copying 3 of 12 — 45%", the current name and a cancel button, over a
+  band that lists the batch one card per source path, sorted, the item being worked on
+  lifted. The band shows a few cards and scrolls inside them, so a batch of hundreds reads
+  the same as one of three. One job runs at a time; later requests queue in order.
 - A conflict suspends the band and opens a modal over the dialog, in the same in-dialog
   form as the save's Replace question: Replace / Skip / Keep Both / Rename, with Apply to
   All. `Enter` answers Replace and `Escape` cancels; the list waits behind the scrim.
 - A finish with failures: "1 item could not be moved" with the names and reasons, in a
   small non-modal window of its own beside the dialog. Silent partial success is not
   acceptable.
+- The confirmations that name a set — permanent delete and undo-copy — list it on the same
+  cards, capped and scrolling: the sentence says how many, the cards say which ones.
 - Cut rows dim and a successful paste clears the dimming.
 - Rename reuses the inline field, not a dialog.
 
@@ -588,7 +594,9 @@ suspends the footer band and opens the conflict question over the dialog (Replac
 Keep Both / Rename, with Apply to All), and a finish with failures opens the failure window,
 a modeless window of its own (a popup under the toolbar only where the platform has no
 window surfaces). The footer carries the job's kind, item count, percent, current name and
-a cancel button.
+a cancel button; the band above it lists the batch as cards, sorted by path, the current item
+lifted and the rest scrolling, and the permanent-delete and undo questions list their own set
+the same way.
 
 Known deferrals: a menu's Paste row is enabled whenever the service exists, because the engine
 has no clipboard-content listener to dim it or to say "Paste 3 items"; Open With, Sort By and a

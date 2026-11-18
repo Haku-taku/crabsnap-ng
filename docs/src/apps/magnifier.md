@@ -43,9 +43,9 @@ blurs the pixels it is meant to help read.
 ### The selection readout
 
 Two pills in one row: the selection's origin as `x, y`, and its size as
-`w × h`. Both count **image pixels** — the surface point multiplied by the
-frame's device ratio — because that is what `Save` writes and what a file
-viewer reports. The row shows whenever a selection exists, including while it is
+`w × h`. Both count **image pixels** — the bounds `Image::crop_of` takes from the
+selection, floor and ceil included — because that is what `Save` writes and what a
+file viewer reports. The row shows whenever a selection exists, including while it is
 being dragged, resized or moved.
 
 Placement is a fallback chain, in this order:
@@ -138,13 +138,17 @@ aimed pixel's image coordinates. The bottom one is the colour:
 its body *is* that colour, opaque, and its ink is black or white, whichever the
 WCAG relative luminance of the body makes more legible. A white `#RRGGBB` on a
 pale swatch would vanish, which is why the text follows the colour instead of
-the other way round. The colour is read from the same SDR rendition the disc
-shows, so body and pixels agree.
+the other way round. The colour is read from the picture's SDR placement, so
+the body is the pixel as the pill's `#RRGGBB` states it.
 
-The disc's pixels are the picture with its document, rasterized through the same
-list a file gets: every mark the document holds shows in the disc, and a stroke
-in flight is a preview in that document from the frame it has a shape, so the
-disc follows the hand rather than waiting for the release. The guide rectangle
+The disc's pixels are the picture in the picture's own packing. A window with no
+mark is read straight from the picture, so an HDR one stays half-float scRGB and
+a highlight keeps the light the pin below shows. Only a document with a mark is
+rasterized through the same list a file gets: every mark the document holds then
+shows in the disc, and a stroke in flight is a preview in that document from the
+frame it has a shape, so the disc follows the hand rather than waiting for the
+release. That raster is sRGB8, so a marked HDR picture's disc is SDR — the same
+limit the export states. The guide rectangle
 is separate from that ink: it names the box a mark occupies, which a one-pixel
 line or an unfilled rectangle would otherwise leave to guesswork.
 
@@ -272,6 +276,32 @@ children, so the finished subtree arrived with none. `child_decl` is the door
 for a finished subtree. The 0 × 0 was first papered over with a fixed size,
 which hid the loss and left the pills' height disagreeing with placement by a
 point.
+
+**The disc flattened HDR to SDR.** Every disc read a window rasterized into
+`ui_paint::Pixels`, which is sRGB8, even when the document held nothing, and
+`bake` converted each texel to SDR with `Destination::SDR`. On an HDR picture
+that mapped every highlight the pin preserved onto SDR white: the user reported
+that a testufo HDR patch and its neighbours showed as one flat colour inside the
+disc. A window with no mark is now read through `Source` in the picture's own
+packing — half floats are copied verbatim, only alpha takes the rim coverage,
+and the disc is registered with the picture's `ContentColour`. Reading the whole
+picture rather than rasterizing it is also what keeps the cost down, since
+nothing draws on it. What catches a regression is
+`a_light_picture_keeps_its_highlights_on_the_disc`, which is red under the
+converting bake (an sRGB8 disc with 3.0 scRGB clipped to the SDR code). Marks
+remain an SDR raster, so a marked HDR picture still brings the disc back to SDR.
+
+**The disc always showed the picture's top-left corner.** The fix above gave
+`Source` the picture pixel its first texel stands for, and its two callers passed
+it the wrong way round: the whole picture, whose first texel is pixel `(0, 0)`, was
+given the window's corner, while the window's raster — whose first texel is that
+corner — was given `(0, 0)`. `Source::bytes` subtracts the origin before
+indexing, so every disc read the block at the picture's corner however the
+pointer moved, and the user reported that the disc never left it. The two cases
+are separate constructors now: `Source::of_picture` cannot name an origin at
+all, and `Source::of_window` takes the corner beside the raster it belongs to.
+The `Source` tests could not catch the swap because they build the
+whole-picture case directly; what holds is that no caller can express it.
 
 **`from_decl` refused the subtree instead of keeping it.** The guard that
 followed — a `debug_assert!` that the wrapped declaration is childless, and a
@@ -424,9 +454,19 @@ the bar. The pin editor's path shares the same builder and was read, not
 driven: the nested session has no pointer-button injection, so its right-hold
 was not exercised by hand.
 
-The loupe shows the picture in the display's SDR rendition, so a highlight above
-the SDR peak reads clipped there; the saved file rolls it off into white with
-BT.2390 instead, so above white the disc and the file are not the same picture.
+A picture with no mark reaches the disc in its own packing, so an HDR window
+keeps its highlights on the disc as on the pin; the saved file rolls them off
+into white with BT.2390 instead, so above white the disc and the file are still
+not the same picture. A marked picture is read through an SDR raster and so
+comes back to SDR.
 The disc is baked on every frame it is visible, at 120 times the surface's
 device ratio in texels: 120 × 120 on a 1× surface, 240 × 240 at 2×. Its cost is
 part of the overlay's own frame time rather than measured separately.
+
+**The readout rounded where the crop did not.** The pills multiplied the selection's origin
+and size by the device ratio and rounded each on its own, while the saved picture took the
+crop's outward-rounded bounds; a selection ending on a fractional point could state one
+pixel less than the file carried. `labels` takes `Image::crop_of`'s bounds now, so the pill
+and the picture share one rounding rule. The pointer's own position is the centre of the
+pixel it is over ([Pointer Model](../engine/pointer-model.md#coordinates)), which is what
+lets a drag to the screen's corner state the whole output.

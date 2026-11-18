@@ -238,9 +238,14 @@ Continuous pointer samples are absorbed unless they can change a pixel.
 
 ## Coordinates {#coordinates}
 
-Events carry device pixels. `pointer_local` converts the current pointer into the
-captured node's space; the node is the one from the press, so a drag keeps answering in
-that space even after the pointer leaves the node's rect.
+Events carry logical units, the same space as layout. `pointer_local` converts the current
+pointer into the captured node's space; the node is the one from the press, so a drag keeps
+answering in that space even after the pointer leaves the node's rect.
+
+A position names where the pointer is, not the corner of the pixel under it: the Win32
+backend reports the centre of that pixel, so a drag to the bottom-right corner of a
+2560×1440 output ends at `(2559.5, 1439.5)` and a crop that rounds outwards keeps the last
+row and column. The corner put `(2560, 1440)` out of reach.
 
 A drag has three measurements, and the wrong one is how an object drifts. `cx.local()` is the
 pointer in the pressed node's own space. `cx.drag_step()` is the movement since the previous
@@ -497,3 +502,26 @@ Caught by `a_press_joins_its_burst_only_within_the_desktops_gap_and_rectangle` i
 `crates/ui-platform/src/view/tests.rs` (red: a second press inside the rectangle was two
 separate clicks) and the picker's
 `a_double_click_opens_a_file_while_one_click_only_selects_it`.
+
+**A selection could not reach the last row and column of the screen.** The Win32 backend
+turned a client pixel into logical units by its top-left corner, so over a 2560×1440 output
+the pointer stopped at `(2559, 1439)`: a selection rounded outwards to the pixel grid always
+lost one row and one column, and the whole screen could not be captured. The backend now
+reports the centre of the pixel the pointer is over, which is the position the loupe's
+`floor` already assumed. Caught by `the_pointer_over_the_last_pixel_sits_inside_it` in
+`crates/ui-platform-win32/src/window.rs`.
+
+**A pin kept its hover skin after the pointer left it.** The Win32 window armed mouse
+tracking behind a latch, which was replaced with a call on every move; the symptom stayed,
+and that first diagnosis was wrong. A shaped window does report `WM_MOUSELEAVE` when the
+pointer leaves it — the `layers` example checks exactly that by moving the cursor off the
+shape — so the leave was never the problem. The host resolved the group's shared pointer
+before the root surface's own step, which is where the root's queue is read, and handed the
+frame the previous turn's place as its pointer hint. Leaving a pin to the desktop therefore
+rebuilt the hover at the pin's last position: unchanged, no damage, no next frame, and only
+a later move elsewhere refreshed it. Only a panel answers the hint now, because its intake
+has run; the root's place reaches the same frame as the event its step dispatches. Caught by
+`a_leave_ends_the_hover_in_the_frame_it_builds` in `crates/ui-platform/tests/host_loop.rs`
+(red: the leave's own frame recorded the pointer where it had been). Tracking is still
+re-armed on every move: the call is idempotent, and a tracking the system ended without a
+message must not leave the window unable to hear the next leave.

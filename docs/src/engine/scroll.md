@@ -171,8 +171,10 @@ than the container drawing it as one of its shapes. A bar is an affordance for
 the whole viewport and its rects stay live press targets, so an opaque child —
 a page fill, a card, a drawer surface — must not cover it.
 
-The default thumb is translucent black, which is invisible on a dark surface.
-A control supplies its own colour; `List` uses the pack's `OnSurface` at 40%.
+The shared default thumb is translucent black, which is invisible on a dark surface. A
+scroller that knows its pack takes `ScrollbarConf::on(pack)` — the pack's `OnSurface` at
+40 %, visible in either appearance — and `List` does so; a scroller over a surface it paints
+itself is the only one with a reason to name a colour.
 
 ## Dragging, flinging, bouncing
 
@@ -311,6 +313,16 @@ skips the clamp only there.
 translucent black is right on a light surface and invisible on a dark one.
 `List` takes its thumb colour from the pack's `OnSurface` role instead of
 inheriting the default.
+
+**A scroller that fell back to the shared default vanished in the dark appearance.** The
+picker's sidebar named no scrollbar, so it took the translucent black default: on a dark pack
+its thumb was invisible while the list and the grid beside it showed theirs. The earlier fix
+above had taught `List` the colour, which is the wrong layer — every other scroller in the
+same dialog (the crumbs and footer menus, the failure list and the folder chooser) wrote its
+own copy of the formula or forgot it, and the sidebar was one that forgot. `ScrollbarConf::on(pack)`
+now holds the rule where a bar is configured, `List` and every picker scroller name it, and
+the three duplicated formulas are gone. Caught by hand in `picker_demo`, dark appearance, a
+mount list long enough to scroll: no test pins a colour, and the report was visual.
 
 **A wheel over page chrome was reported as a semantic change.** With no scroller
 on the path, routing fell back to the raw hit target, so a wheel over a label or

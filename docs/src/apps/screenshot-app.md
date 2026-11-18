@@ -104,17 +104,23 @@ and turns between two layouts must be positioned on the frame it is drawn in.
 
 The drag itself is the engine's: the overlay's root declares `Sense::DRAG`, and
 `cx.pressed()` against its own id says whether the press belongs to it, with
-`cx.local()` giving the point in that node's space. Outside the selection is
-four dim bands rather than one hole, because the paint list has no clip
-subtraction. A drag shorter than 4 px is a click and clears the selection; a
+`cx.local()` giving the point in that node's space. Outside the selection is one
+`Decl::scrim` node over the whole surface, holding the selection as its hole:
+an engine scrim, not a black fill, so the dim hides the same fraction of what
+the display shows whether the pixels are SDR codes or light past white (see
+[Freeze](../engine/colour.md#the-scrim)). One node rather than bands, because
+bands that meet would dim the selection's edge twice.
+A drag shorter than 4 px is a click and clears the selection; a
 pointer dragged past the edge clamps to the surface. Escape closes the overlay,
 which needs the layer surface to hold the keyboard (`keyboard: true`).
 
 Verified in a nested session by pixel sampling against a capture of the same
 desktop: inside the selection the overlay's pixels equal the bare desktop
-exactly, outside they are 0.57× (black at alpha 110), and the 1 px border lands
-on the rect's origin. `shot region --demo` paints a fixed rectangle for exactly
-this check.
+exactly, outside they are 0.57× up to white and 0.57× of the peak's light above
+it, and the 1 px border lands on the rect's origin. `shot region --demo` paints
+a fixed rectangle for exactly this check. `gpu_scrim_scene` states the same
+numbers offscreen on D3D11: PQ 113 inside the selection and 86 outside for a
+mid grey, 219 → 136 for a highlight, and no dark line at the hole's edge.
 
 While the selection was being built it was driven by scripted probes as well,
 which pressed, moved and released through `AppLoop::dispatch` and printed the
@@ -664,7 +670,7 @@ later.
 | The fixed end of a drag | Moving a surface with its own pointer input feeds back and drifts; an object moves inside a still surface instead | Done: `Cx::press_origin()`, the press position in surface coordinates, fixed for the gesture |
 | A line and an ellipse shape | Annotation arrows and ellipse tools cannot be approximated by rects | Done: `Shape::Line` declares the scene's stroked segment, and `Shape::Ellipse` a filled and/or stroked ellipse; the CPU rasteriser and a GPU shader both derive coverage from one distance estimate, held to 3 LSB by the dual-backend scene check |
 | A rendition for 10-bit captures | An HDR output's shm capture is PQ-encoded BT.2020, so truncating it to 8 bits is neither sRGB nor the desktop | Done where the pixels are needed, not at ingest: `wp_color_manager_v1` states the output's primaries, transfer function and peak, `color.rs` reads it into a `ContentColour`, and `Image`/`Cropped` keep the native words. A file gets `Cropped::rendition`: decode, convert the stated primaries into sRGB, roll what is above the file's white off with BT.2390 bounded by the picture's measured peak, encode. Both transfer functions are tabulated — 70 ms for a 2560×1440 frame against 348 ms untabulated, measured in release on this machine; a picture above the file's white also runs the curve per texel, which is not tabulated and is measured on the save worker rather than on the frame. Measured against an independent implementation of the same steps: within 1 LSB, two at the very bottom of the curve, except the most saturated primaries, whose cross-channel leakage is the gamut conversion itself |
-| Surfaces that match an HDR output | An SDR surface on an HDR output is mapped by the compositor with a curve the app cannot see, so its own colours are not the ones the display receives | Done: `GpuWindow::open` asks `WaylandWindow::declare_hdr_surface`, which reads the output's luminances and transfer function, declares the output's own description, and presents f16 encoded to PQ at that output's reference white and gamut; `SurfaceColour::Sdr` opts out. A pinned chart captured from the output returns to its own colours, the same 1-LSB agreement as the tone-map row |
+| Surfaces that match an HDR output | An SDR surface on an HDR output is mapped by the compositor with a curve the app cannot see, so its own colours are not the ones the display receives | Done: a surface that asks for `ColourPolicy::Auto` — the pin canvas and the capture overlay do — reaches `WaylandWindow::declare_hdr_surface`, which reads the output's luminances and transfer function, declares the output's own description, and presents f16 encoded to PQ at that output's reference white and gamut; every other surface stays `Sdr`. A pinned chart captured from the output returns to its own colours, the same 1-LSB agreement as the tone-map row |
 | Offscreen canvas on the GPU | Annotation baking and caching must not round-trip through CPU memory | Not started; render into an `OffscreenFbo`, read back only when exporting |
 | Zero-copy dma-buf capture | A whole output crosses the CPU once per grab through shm | Not started; this compositor offers `zwp_linux_dmabuf_v1` v5, so the capture side is available, but the engine's image source is `Arc<Vec<u8>>` — it needs a texture source imported from a dma-buf, and saving still needs a mapped read of the same buffer |
 

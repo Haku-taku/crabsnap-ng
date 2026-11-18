@@ -1,10 +1,11 @@
 # Colour and HDR
 
 A pixel buffer's bytes never travel without a description of what they
-mean. Storage format and working domain are separate decisions: SDR stays in
-8-bit sRGB and blends in the encoded domain, while HDR stores linear light
-and blends there. Treating "HDR support" as one branch in one function
-is the mistake this model exists to prevent.
+mean. Precision and blend domain are separate decisions: every surface stores
+sRGB-encoded values and blends in them, while an HDR surface differs in the
+range those values may cover — light past 1.0, which needs f16 — and in the
+encoding the output pass writes. Treating "HDR support" as one branch in one
+function is the mistake this model exists to prevent.
 
 The same separation applies to content. A capture, a pin or an imported
 image carries the description it was made with; the display has its own.
@@ -20,12 +21,16 @@ Neither is rewritten to fit the other.
 | `BufferFormat` | `Bgra8Srgb`, `Rgb10a2`, `Rgba16Float` |
 | `OutputDescription` | Colour space, transfer, peak and black luminance, from the compositor |
 | `SurfaceColour` | What one surface presents and blends in: `Sdr` or `Hdr` |
+| `Destination` | Where content is drawn: a `Domain` and a tone curve |
+| `Domain` | `Encoded` (sRGB codes in 8 bits) or `Extended` (signed sRGB codes past 1.0, in f16) |
+| `OutputEncoding` | How an extended surface's buffer is presented: `Pq` or `ScRgb` |
 | `ContentColour` | The description an image or capture was authored with |
 | `ToneMapping` | The curve that maps content above the display's peak |
 
-`Encoding::SDR_PREMULTIPLIED` is what every SDR path produces;
-`LINEAR_PREMULTIPLIED` is the HDR working domain. Premultiplication is in
-the type because it cannot be inferred from bytes.
+`Encoding::SDR_PREMULTIPLIED` is what an SDR buffer holds;
+`LINEAR_PREMULTIPLIED` is the diagnostic alternative `composite_over_in`
+measures against, and no surface carries one. Premultiplication is in the type
+because it cannot be inferred from bytes.
 
 ## Two descriptions
 
@@ -71,34 +76,86 @@ If encoding lived in several places, a change to primaries or tone mapping
 would have as many copies as there are output paths, and two disagreeing
 copies show up as a colour cast on one path only.
 
-## How a linear destination is encoded
+## How an extended destination is encoded
 
-A linear destination also states which encoding its bytes carry.
-`LinearEncoding::Pq` is PQ over BT.2020, which is what a Wayland colour manager
-asks for; `LinearEncoding::ScRgb` is linear light in sRGB primaries whose 1.0 is
+An extended destination also states which encoding the presented buffer carries.
+`OutputEncoding::Pq` is PQ over BT.2020, which is what a Wayland colour manager
+asks for; `OutputEncoding::ScRgb` is linear light in sRGB primaries whose 1.0 is
 `SCRGB_WHITE_NITS` (80), which is what a DXGI float swap chain carries on an
 advanced-colour display. The two differ in gamut and in where white sits, so the
 renderer keeps the choice and the output pass has one variant per encoding. The
 scRGB variant scales the scene's reference white into 80-nit units and writes the
-light unencoded; PQ leaves that to `encode_for_pq_output`.
+light unencoded; PQ leaves that to `encode_for_pq_output`. The frame itself is
+the same on both: sRGB codes, converted in that single pass. An extended frame's
+codes are signed: a channel below zero is light outside the sRGB triangle — a
+wide-gamut capture's scRGB channel is negative there — and both output variants
+decode the curve mirrored through the origin. An eight-bit frame cannot hold
+that value, and its clamp is then the surface's real limit, not the pipeline's.
+The scRGB variant does not clamp at the display either: values below zero are
+colours the panel may hold outside the sRGB triangle, and values above the
+display's declared peak are light its compositor still carries — the peak is a
+number the panel reports, not a bound the frame applies.
 
 ## Blending domain
 
-The SDR path blends encoded values. This is deliberate, and the difference is
+Every surface blends encoded values. This is deliberate, and the difference is
 not cosmetic: 50% white over opaque black gives 128 in the encoded domain
 and 187 when decoded, blended, and re-encoded. Switching SDR to linear
 blending would brighten every translucent surface, so it is an appearance
 change, not a bug fix.
 
-HDR stores linear values in the buffer, so composition needs no decode; the
-same measurement means the two paths are two data streams, not one function
-with a flag. `composite_over_in` remains as a diagnostic that quantifies the
-gap.
+The same measurement decides the HDR side, and there the argument is
+consistency rather than fidelity. Physical light is the right domain for
+averaging radiance, but interface content is authored against the encoded
+domain: a glyph's dark stroke at partial coverage is code 60 when blended
+encoded and 107 when blended linear, so a light-appearance label drawn on an
+HDR window read visibly thinner and fuzzier than the same label on SDR — every
+stem sits at partial coverage (see
+[text rendering](./text-and-input.md#subpixel-placement)). A control that
+looked one way on SDR and another on HDR would have to be authored twice;
+weight, shadows and translucent washes all follow the same rule. Blurs and
+frosts over HDR content therefore average codes too, exactly as they do on SDR.
 
-The domain follows the surface. Both domains use premultiplied alpha and the
-same blend equation, so one shader source serves both: only the passes that
-cross the encoding boundary — the present pass and the capture pass — are
-compiled as two variants, selected by `#define`.
+So the frame is one data stream at two precisions: eight-bit sRGB on an SDR
+surface, f16 sRGB on an extended one. `composite_over_in` remains as a
+diagnostic that quantifies the gap.
+
+Both domains use premultiplied alpha and the same blend equation, so one shader
+source serves both: only the output pass knows the surface's encoding.
+
+### The scrim {#the-scrim}
+
+Hiding light is the one operation the encoded domain cannot express. A
+translucent black fill multiplies codes, and a code above white still holds more
+light than the display can show: on this machine's example — a 240-nit
+reference, a 470-nit peak — a 2670-nit highlight sits at code 2.82, the display
+shows it as its 470-nit peak, and a 0.57× multiply leaves 713 nit of light,
+which the display shows as that same peak. The highlight does not move while
+every pixel at or below white darkens.
+
+An engine scrim (`BackdropMaterial::Scrim`, `Decl::scrim`) therefore clamps the
+frame's straight codes at the destination's peak code — the sRGB encoding of
+`peak / reference` — and only then attenuates them:
+
+```
+code' = min(code, peak_code) × (1 − opacity)
+```
+
+Below white this equals the old multiply, so SDR pixels keep their value. Above
+it every highlight lands at the peak's light times the same factor: code 1.341
+becomes 0.763 at opacity 110/255, the same step in code space as every other
+pixel, so the dim reads as one uniform darkening.
+
+It is a backdrop material rather than a fill because it must read the frame it
+is drawn on and write it back. A scrim carries no blur, and the frame cannot be
+sampled while it is bound for writing, so its backdrop is a straight copy into
+scratch and the composite pass does the shading (`u_scrim`, on the layer
+program).
+
+A scrim may name a `hole` — a rect in its own space that stays lit, which is
+what a selection overlay's dim is. The shader fades the scrim out across the
+hole's edge (`u_scrim_hole`), so the boundary is dimmed once; four bands around
+the same hole would dim their shared edge twice and show a dark line along it.
 
 ## Surface colour {#surface-colour}
 
@@ -116,6 +173,13 @@ enum SurfaceColour {
 surface; a constructed description claims a 10000-nit peak and is mapped
 down by the compositor. A surface that cannot declare HDR stays `Sdr` and
 keeps rendering.
+
+Which surfaces may reach `Hdr` is the surface spec's `ColourPolicy`
+(`ui-platform/src/window.rs`): `Sdr`, the default, presents SDR even on an HDR
+output and leaves the compositor to map it like any other SDR window; `Auto`
+takes the output's description. Interface content is authored in sRGB, so only
+a surface that draws light — a pin canvas, a capture overlay — asks for `Auto`.
+A panel inherits its parent's policy, because it is that surface's chrome.
 
 The value is not a mode and not a build feature. Two surfaces in one process
 can hold different values, and the CPU presenter is always `Sdr`.
@@ -181,22 +245,23 @@ Placement by pair:
 | Content | Surface | Treatment |
 | --- | --- | --- |
 | SDR | SDR | unchanged: the codes are handed over and never leave eight bits |
-| SDR | HDR | SDR white at the surface's reference nits; no curve |
-| HDR | HDR, peak sufficient | gamut conversion only |
-| HDR | HDR, lower peak | tone curve to that peak |
-| HDR | SDR | tone curve to the SDR peak |
+| SDR | HDR | the same codes at the surface's reference white; no curve |
+| HDR | HDR, peak sufficient | gamut conversion, then the extended sRGB curve |
+| HDR | HDR, lower peak | tone curve to that peak, then the curve |
+| HDR | SDR | tone curve to the SDR peak, then the sRGB curve |
 
 Only the first row is the identity, and it is the one every existing SDR
-picture takes. A picture is never rewritten: `Image` and `Cropped` in the app
-carry the native bytes and the description, and each renderer builds its own
-texture from them.
+picture takes; the second writes back the codes it read, so an SDR picture
+keeps its values on either surface and only the texture's precision differs.
+A picture is never rewritten: `Image` and `Cropped` in the app carry the native
+bytes and the description, and each renderer builds its own texture from them.
 
 ## Tone mapping {#tone-mapping}
 
-Applied in this order: decode to absolute luminance, convert primaries, place
-in the working domain, then apply the curve as a ratio on the luminance so
-hue survives. The engine's own interface is authored SDR and never passes
-through the curve; on an HDR surface it is only placed at the reference
+Applied in this order: decode to absolute luminance, convert primaries, apply
+the curve as a ratio on the luminance so hue survives, then encode into the
+destination's codes. The engine's own interface is authored SDR and never
+passes through the curve; on an HDR surface it is only placed at the reference
 white. A destination whose peak covers the content's gets no curve at all.
 
 | Strategy | Character | Source |
@@ -251,12 +316,14 @@ light a capture of an HDR screen arrives as.
 - The Wayland backend reads the output's image description through
   `wp_color_management_v1` when the compositor offers it, and adapts white
   points with Bradford by default.
-- `GpuWindow::open` asks the window for an HDR surface and follows the answer
-  (`WaylandWindow::declare_hdr_surface`): when the output's peak is above SDR
-  and its transfer is PQ, it declares the output's own description, presents
-  f16, and encodes to PQ at that output's reference white and gamut.
-  `SurfaceColour::Sdr` opts a surface out; a compositor without colour
-  management leaves every surface SDR.
+- `GpuWindow::open` declares HDR only for a surface whose `ColourPolicy` is
+  `Auto`, and follows the answer (`WaylandWindow::declare_hdr_surface`): when
+  the output's peak is above SDR and its transfer is PQ, it declares the
+  output's own description, presents f16, and encodes to PQ at that output's
+  reference white and gamut. `Sdr` leaves the surface on its sRGB buffers; a
+  compositor without colour management leaves every surface SDR.
+- Windows' `open_chain` takes the same branch: only an `Auto` surface tries the
+  f16 chain and PQ or scRGB colour space before falling back to `B8G8R8A8`.
 - The CPU path produces `SDR_PREMULTIPLIED` and the same encoding point.
 
 ## Implementation sites
@@ -264,9 +331,11 @@ light a capture of an HDR screen arrives as.
 | File | Responsibility |
 | --- | --- |
 | `ui-core/src/colour.rs` | transfer functions, gamut matrices, format choice, `ContentColour`, `Placement`, tone curves |
+| `ui-platform/src/window.rs` | `ColourPolicy` on the surface spec: `Sdr` unless the caller asks for `Auto` |
 | `ui-platform-wayland/src/window.rs` | reads output descriptions, declares the surface, builds `HdrSurface` |
 | `ui-platform-wayland/src/gpu_window.rs` | turns `SurfaceColour` into a destination, a target pool and renderer state |
-| `ui-gpu-scene/src/renderer.rs` | working domain, target formats, per-destination texture builds, present pass |
+| `ui-platform-win32/src/presenter.rs` | opens the f16 HDR chain only for an `Auto` surface, else `B8G8R8A8` |
+| `ui-gpu-scene/src/renderer.rs` | the frame's precision, per-destination texture builds, output pass |
 | `ui-paint/src/lib.rs` | the CPU painter's samples, through the same `Placement` |
 | `apps/crabsnap/src/color.rs` | reads the compositor's description into a `ContentColour` |
 | `apps/crabsnap/src/capture.rs` | keeps the native frame and its description; the SDR rendition for a file |
@@ -310,7 +379,8 @@ against the model's own 203 nits.
 | Choose the format from peak luminance alone | HDR content on an 8-bit buffer bands in dark gradients |
 | Pick 10-bit for HDR because its colour depth suffices | `ABGR2101010` has 2 bits of alpha: shadows and antialiased edges band |
 | Blend SDR after decoding to linear | Every translucent surface jumps brighter |
-| Blend HDR in the encoded domain | Blur and alpha compositing pick the wrong brightness |
+| Store an HDR frame as linear light | Text and edge antialiasing read thinner in light appearance, and every translucent surface differs from the SDR window |
+| Choose the surface's storage from the blend domain | Either eight bits for extended light (highlights clip) or f16 for an SDR frame (memory for nothing) |
 | Hardcode 80 or 100 nits as SDR white | The same UI looks different on a display with another reference level |
 | Add a second encode step for an overlay or screenshot | A cast appears on exactly that path |
 | Use `XRGB` fourccs | The compositor composites without your alpha |
@@ -327,6 +397,7 @@ against the model's own 203 nits.
 | Destroy the surface feedback after reading it | The compositor's change of mind is never heard |
 | Call `get_surface` again when re-resolving | Protocol error "CM surface already exists" and the connection dies |
 | Tone map interface colours | The same control changes appearance with the display's peak |
+| Dim an HDR frame with a translucent black fill | Highlights past the display's peak come out undimmed: the display shows them at the peak either way |
 
 ## Corrections
 
@@ -447,6 +518,92 @@ unmeasured picture keeps the stated peak, the widest bound it can honestly
 have. Caught by `a_measured_picture_rolls_its_highlights_into_the_file_white`,
 which collapses to two 255s when the file's destination returns to `Clip`.
 
+**The HDR frame held linear light.** The surface's domain was chosen as "the
+space blending runs in", so an HDR surface decoded every colour on the way in
+and blended radiance. That is physically right and visually wrong: interface
+antialiasing, shadows and translucent washes are authored against sRGB codes. A
+glyph's dark stroke at 86% coverage lands at code 60 when blended encoded and
+107 when blended linear, and a quarter-pixel horizontal phase puts almost every
+stem at partial coverage, so a light-appearance label read thinner and fuzzier
+on an HDR window than on the SDR one while the dark appearance only grew
+slightly bolder — the report that found this. The frame is now sRGB-encoded on
+every surface: `Domain::Extended` says only that its codes may exceed 1.0, which
+is why it stores f16, and the output pass converts them to the surface's
+encoding once. `Encode`, the per-primitive linear split, the linear colour
+atlas, the two linear material variants and the resolve pass's encode flag went
+with it; capture still reads codes and writes the same eight-bit picture.
+`an_hdr_surface_stores_the_same_codes_as_an_sdr_one` fails on the old placement
+(code 32 arrived as 0.014 instead of 0.125). This supersedes the "HDR composited
+in the encoded 8-bit domain" correction's claim that the working domain follows
+the surface.
+
+**Every surface on an HDR output became an HDR surface.** `GpuWindow::open`
+declared HDR unconditionally and Windows' `open_chain` tried the f16 chain for
+any window, so a picker or a settings panel on an HDR output paid f16 frames,
+tone mapping and a colour-managed declaration for pixels that never exceed
+white — and its look followed a display setting it had no use for. The surface
+spec now carries `ColourPolicy`: `Sdr` by default, `Auto` only for a surface that
+draws light (the pin canvas, the capture overlay), and a panel takes its
+parent's. Wayland declares HDR and Windows opens the extended chain only under
+`Auto`; the frame holds the same sRGB codes either way, so a control's look does
+not depend on the answer. This supersedes the first correction's "GpuWindow::open
+declares the output's own description by itself"; `window_scene` asks for `Auto`
+so the HDR branch stays exercised, and `WINDOW_SDR=1` runs the other.
+
+**A wide-gamut picture lost its saturation on the way in.** The encoder clamped
+negative light at zero — `Srgb.encode_extended` started with `.max(0.0)`, and the
+tabulated path clamped before the table — so every colour outside the sRGB
+triangle lost the channel that made it, and a capture whose scRGB channel was
+negative arrived desaturated. The user saw it on a pinned testufo HDR patch: the
+pin kept its HDR badge and its light, but not its colour, and a second capture of
+that pin showed the same flattened colour, which is the signature of a
+projection rather than a drifting transform. The extended curve is now mirrored
+through the origin on both sides (`encode_extended`/`decode_extended` and the two
+output shaders), the table falls back to the curve for negative channels, and
+the scRGB output pass no longer clamps light at zero. An eight-bit frame still
+clamps: that is the surface's own limit. What catches it is
+`light_outside_the_working_triangle_survives_an_extended_frame`, red on the
+clamping encoder (a −0.5 scRGB channel arrived as −0.0).
+
+**The frame clipped light at the display's declared peak.** The extended encode
+was tabulated up to `peak/reference` white units, and a value past the table's
+top was held at its last entry, so every highlight above the output's
+`MaxLuminance` reached the panel as exactly that value. That peak is what the
+panel reports, not a bound the compositor applies: capturing this 2560x1440
+output (SDR white 240 nits, declared peak 470) showed the desktop carrying up
+to 2670 nits, and the user saw a pinned HDR patch drawn visibly darker than the
+same patch beside it. The linear frame before the encoded working domain had no
+upper clamp, which is why the regression arrived with the extended frame. The
+table is a fast path again: light outside its range, above the top as well as
+below zero, is put through `encode_extended` itself. An eight-bit frame still
+clamps, because that is the surface's own limit. Caught by
+`light_above_the_surfaces_peak_still_reaches_an_extended_frame`, red on the
+clamping table (2560 nits arrived as 470). Checked end to end with a temporary
+offscreen D3D11 probe: a half-float picture of 2670 nits now lands in the
+presented buffer at the PQ code that light owns.
+
+**The freeze overlay dimmed with a translucent black fill.** The bands were
+shapes filled with black at alpha 110, which multiplies codes: correct below
+white and invisible above it, because the display already shows 2670 nits as
+its 470-nit peak and 0.57× of the light still sat above that peak. Every SDR
+pixel darkened and every HDR highlight did not; the user reported it as "HDR
+highlights are almost not dimmed". The dim is a scrim now, which clamps at the
+destination's peak code before attenuating (see [the scrim](#the-scrim)). What
+catches it now: a scrim's output is `min(code, peak) × (1 − opacity)`, so no
+input can stay above the peak's share, and the SDR result is unchanged because
+the clamp does nothing at or below white.
+
+**The dim was four bands, and their shared edges were dimmed twice.** The paint
+list has no clip subtraction, so the scrim was declared as four boxes around the
+selection. Two boxes that abut are each composited by their own pass: their
+edges round to the same device pixels, and the antialiased half-coverage of one
+meets the other's, so the boundary line came out darker than everything beside
+it — the user saw a black strip about one pixel wide between the bands. A scrim
+now carries its hole (`Decl::scrim(opacity, hole)`), so one pass dims one
+region and fades out across the hole's edge. What catches it now:
+`gpu_scrim_scene` renders a hole and fails if any pixel past its edge is darker
+than the dimmed side.
+
 ## Verification
 
 | Check | What it catches |
@@ -457,13 +614,18 @@ which collapses to two 255s when the file's destination returns to `Clip`.
 | `gpu_hdr_scene` [3], [5] | a capture that depends on the output transfer, the frame format or the sample count |
 | `gpu_hdr_scene` [4] | an HDR frame that is not f16 |
 | `gpu_hdr_scene` [6] | an f16 target allocated with the wrong element type |
+| `an_hdr_surface_stores_the_same_codes_as_an_sdr_one` | an HDR frame that holds linear light, so glyph and edge coverage blends differently from SDR |
 | `a_pq_picture_on_an_sdr_surface_keeps_its_white_and_mid_grey` | content converted to absolute light twice, or the curve running where the peak already fits |
 | `only_srgb_codes_on_an_sdr_surface_are_handed_over_untouched` | the identity branch widening to content it would round trip, or vanishing |
 | `the_bt2390_curve_reaches_both_peaks_and_never_folds_back` | a curve that misses its endpoints or folds |
 | `a_ten_bit_frame_keeps_its_words_and_gains_opaque_alpha` | a 10-bit frame repacked into eight bits, or an `X` surface left transparent |
 | `a_float_frame_keeps_the_light_above_white` | a float desktop reduced to four bytes a texel at ingest |
 | `a_float_picture_keeps_its_light_above_the_reference_white` | a float texel put through the transfer decode, so 640 nits arrives as 203 |
+| `light_outside_the_working_triangle_survives_an_extended_frame` | an extended frame clamping a negative channel, so a wide-gamut colour arrives desaturated |
+| `light_above_the_surfaces_peak_still_reaches_an_extended_frame` | an extended frame clipping at the display's declared peak, which its compositor does not apply |
 | `a_new_buffer_behind_a_known_id_is_uploaded_again` | a texture kept after its description or destination changed |
+| `gpu_scrim_scene` | a scrim multiplying codes past the peak, so an HDR highlight comes out as bright as it was |
+| Offscreen D3D11 picture through the output pass (run by hand, probe removed) | an extended frame or an output pass dropping light above the declared peak |
 | Dual-domain scene (planned) | encoded and linear domains producing different geometry or coverage |
 | Declare / unset / declare on the real compositor (run by hand, probe removed) | a second `get_surface`, or an unset that does not commit |
 
@@ -489,16 +651,15 @@ half rests on review, and is the first thing to watch on a two-output setup.
 
 Implemented: transfer functions and gamut matrices, the buffer format choice
 and DRM fourccs, the single PQ output path, the compositor's output
-description and colour-management surface on Wayland with automatic HDR
-surface creation, the working domain that follows it, and re-resolution when the
+description and colour-management surface on Wayland with HDR surface creation
+for a surface that asks for `ColourPolicy::Auto` (the Windows chain follows the
+same policy), the destination that follows it, and re-resolution when the
 surface's output, the compositor's preference or the panel's description changes:
 a changed buffer format rebuilds the target pool, forces the atlases and image
-textures to upload again, and repaints the whole surface. An SDR surface
-draws into 8-bit sRGB and blends there; an HDR surface draws into linear f16,
-with solid colours, gradient stops, images, the colour atlas and the material
-uniforms converted at the boundary, and only the present and capture passes
-compiled as two shader variants. Captures read the frame before the output
-transform.
+textures to upload again, and repaints the whole surface. Every surface draws
+sRGB codes and blends them; an SDR surface stores eight bits, an extended one
+f16 with codes allowed past 1.0, and only the output pass is compiled for the
+surface's encoding. Captures read the frame before the output transform.
 
 `ContentColour` travels with every picture: a capture keeps its native 10-bit
 words or its scRGB half floats and the compositor's description, a crop of it
@@ -516,8 +677,8 @@ output. Tone mapping is chosen per path, not configured: display uses
 Planned: `[hdr]` tone-mapping settings with export renditions, and the export
 design that decides what an HDR file is; GPU-resident content sources
 (dma-buf import); a colour-management path on platforms other than Wayland;
-a working domain that carries the surface's own primaries instead of sRGB,
-which currently clips wide-gamut content at the sRGB triangle.
+a working domain that carries the surface's own primaries, so content outside
+the sRGB triangle is converted rather than carried as a negative channel.
 
 ## See also
 

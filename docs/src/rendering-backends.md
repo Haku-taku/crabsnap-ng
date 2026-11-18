@@ -421,16 +421,20 @@ above. The store's derivation is what the tests in
 `a_removal_counts_the_engines_bytes_not_tsfs_units`, and
 `a_range_inside_a_surrogate_pair_snaps_to_a_character_boundary`.
 
-The swap chain follows the output it lands on into HDR. An output the desktop is
-composing in `DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020` gets a
-`R16G16B16A16_FLOAT` chain, and the renderer takes a linear destination, so the
-output pass writes light rather than sRGB codes. The space the chain declares is
+The swap chain follows the output it lands on into HDR, when the surface asked it
+to. A surface's `ColourPolicy` (`ui-platform/src/window.rs`) is `Sdr` unless the
+spec said `Auto`; only an `Auto` surface on an output the desktop is composing
+in `DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020` gets a `R16G16B16A16_FLOAT`
+chain, and the renderer takes an extended destination: the frame stays in sRGB
+codes and only the output pass converts them to the light or codes the surface
+declared. The space the chain declares is
 the first one it will present: PQ in BT.2020, or scRGB
 (`DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709`) — linear light in sRGB primaries
 whose 1.0 is 80 nits, which is what the desktop composites in and what Chromium
 declares for windowed HDR. PQ takes BT.2020 through the renderer's gamut matrix;
 scRGB shares the working space's primaries and takes the identity. Every other
-output keeps the 8-bit sRGB chain.
+output, and every `Sdr` surface on any output, keeps the 8-bit sRGB chain the
+compositor maps like any other SDR window.
 
 SDR white is what linear 1.0 is shown at, and DXGI does not report it:
 `DXGI_OUTPUT_DESC1` has no field for the value, which belongs to the display
@@ -455,7 +459,8 @@ reads back as 0.6471 against `decode(0.502) × 240/80 = 0.6476`, and white — 2
 nits, 3.0 — clamps at 1.0 in the 8-bit readback. The probe also refuses a
 destination whose transform would leave the codes where sRGB put them.
 `window_scene`'s `WINDOW_CHECK` expectations follow whichever branch the
-presenter took.
+presenter took, and `WINDOW_SDR=1` asks for the SDR branch on an HDR output so
+the two can be compared.
 
 ### Invariants
 
@@ -469,9 +474,8 @@ presenter took.
 - A band grows over every reader it touches (a frost's box, a layer whose chain
   reads neighbours), and a layer it stays clear of is skipped whole.
 - A capture reads the frame before the output pass, so it holds the scene's own
-  rendition — sRGB codes on an SDR destination, linear light on an HDR one — never
-  the encoded surface; `read_pixels` on the surface returns the bytes the
-  compositor got.
+  rendition — sRGB codes on either destination — never the surface's encoding;
+  `read_pixels` on the surface returns the bytes the compositor got.
 - A size change adds full damage. Without it, bands outside the reported
   region keep old pixels.
 
@@ -638,6 +642,7 @@ shadow scenes each found defects on their first comparison run.
 | Trust the format `GetDesc` reports when the duplication opens | It describes the mode, not the texture `AcquireNextFrame` hands over |
 | Take the first frame after `DuplicateOutput` as the desktop | It is empty; a pointer-only frame has `LastPresentTime` zero and no image |
 | Duplicate on a device from another adapter | A hybrid laptop gets a black frame |
+| State an instance count apart from the uploaded bytes | The draw outruns the upload and reads recycled pool memory: a stale rect renders as a minified frame |
 
 ## Corrections
 
@@ -1455,6 +1460,23 @@ held 1227 handles while browsing and gained about two per open/close cycle. `Dro
 Win32Presenter` closes it now, on whichever thread drops the presenter (with a render thread,
 the GPU thread, between its waits). A handle is bytes, not megabytes, but a sync object DXGI
 opened outlives the chain until the handle goes, so the demo's handle count is the check.
+
+**A backdrop pass drew six instances from one uploaded.** `composite_backdrop`
+ended with `draw_instanced(…, UNIT_QUAD.len() / 2)` — a vertex count passed as
+the instance count — while only one 16-byte instance was uploaded. Six
+instances were drawn; the five past the upload read the driver's
+recycled dynamic allocation, which held the frame's handle rects. The layer
+vertex shader maps `v_uv = a_unit` over each quad, so every stray instance
+painted the whole frame minified into a handle-sized square at a handle's
+position, moving with whatever the pool last held. Only D3D11 showed it:
+GL sizes its instance buffer to the upload, so the extra instances draw
+nothing, and no app reached the path until the scrim made a backdrop part of
+the overlay. `Device::draw_instanced` now takes the bytes alone and divides
+them by the program's stride, and `ProgramSpec` derives that stride from its
+attribute table — the layer programs had claimed `RECT_STRIDE` (39
+floats) while the painter uploaded four — so an upload and its instance count
+cannot disagree. Caught by the signatures; `gpu_scrim_scene` drives the path on
+D3D11, but no probe can predict what a stale rect would contain.
 
 ## Status
 

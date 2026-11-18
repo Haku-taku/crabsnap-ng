@@ -251,10 +251,10 @@ visible rows, which is Dolphin's visible-range rule.
   the list, which has one column. The arrow bindings allow Shift and Ctrl:
   Shift grows the marks from the anchor and Ctrl moves the cursor without touching them, as
   Explorer and Dolphin do; a grid's Shift range is the rectangle between the anchor and the
-  cursor. `Ctrl+A` marks every row the mode accepts. The bindings are app-level `ShortcutId`s
-  the surface installs, so a host that reroutes keys can offer them elsewhere. While the name
-  field has focus the engine gives it the plain arrows, Shift+arrows, letters and `Ctrl+A`
-  first, so typing a name never marks rows or jumps the list.
+  cursor. `Ctrl+A` marks every row and `Ctrl+D` drops every mark. The bindings are app-level
+  `ShortcutId`s the surface installs, so a host that reroutes keys can offer them elsewhere.
+  While a field has focus the engine gives it the plain arrows, Shift+arrows, letters and
+  `Ctrl+A` first, so typing a name never marks rows or jumps the list.
 - A letter moves to the next name whose first letter it is, starting after the cursor, and
   wraps at the end: pressing `r` again advances past the name it is already on, and a letter
   that matches nothing leaves the selection alone. Shift is allowed, so a capital finds the
@@ -272,10 +272,16 @@ visible rows, which is Dolphin's visible-range rule.
   rows cannot open one. A single click on an already-selected row no longer activates: without
   a second event a hesitant click and a double click's first half are the same press, and the
   engine now says which is which.
+- A single mode's answer is a field, not the selection. One marked row the mode can name fills
+  it; a folder mode with no folder marked fills it with the folder on screen; two rows the mode
+  can name leave it empty and the accept button disabled, so the marks stay the verbs' set. A
+  typed path answers as well — it is resolved against the directory on screen, so the dialog
+  can answer with something the listing does not show — and `Enter` on a folder path in an
+  open mode enters it, as a platform's name box does.
 - The marks, the pointer's hover wash and the keyboard's cursor are painted independently.
   A marked row still answers the pointer, because the wash composites over the selection
   fill rather than replacing it, and the cursor draws a `FocusRing` stroke whether or not
-  its row is marked. In a multi mode that is what makes keyboard navigation legible: the
+  its row is marked. That is what makes keyboard navigation legible in every mode: the
   arrows move the cursor, which may sit between or beside marked rows, and `Ctrl+Arrow`
   browses with the marks untouched.
 - A press that travels past the engine's click threshold is a selection drag: the row it
@@ -299,27 +305,35 @@ visible rows, which is Dolphin's visible-range rule.
 
 | Mode | Accepts | Extra |
 | --- | --- | --- |
-| `OpenFile` | one file | filters |
-| `OpenFiles` | several files | filters, multi-select |
-| `SelectFolder` | one directory | directories are the rows that accept |
-| `SelectFolders` | several directories | multi-select over folders |
-| `SaveFile` | a name in the current directory | name field, overwrite question |
+| `OpenFile` | the file the answer field names | filters, answer field |
+| `OpenFiles` | the files marked | filters |
+| `SelectFolder` | the marked folder, or the folder on screen when none is marked | answer field |
+| `SelectFolders` | the folders marked | — |
+| `SaveFile` | the name in the answer field | answer field, overwrite question |
 | `SaveFiles` | the request's names in the current directory | name-list caption, overwrite question |
 
-All six are drawn. A multi mode shapes a click by the modifiers it was made with: a plain
-click replaces the marks with the accepted row, `Ctrl` toggles the row it hits, and `Shift`
-extends the marks from the anchor. The engine reports the modifiers with the row's gesture,
-so the picker's row control reports its own `RowGesture` rather than `Change::Activated`,
-which carries none. A plain click on a row the mode cannot answer leaves the assembled marks
-alone — it is a step of browsing, not an answer. `Space` marks the cursor's row. In
-`SelectFolders` a double click on a folder enters it, which drops the marks: browsing past an
-assembled answer has to stay possible. A click on a file in that mode marks nothing, because a
-file cannot be the answer.
+All six are drawn. Every mode shapes a click by the modifiers it was made with: a plain
+click replaces the marks with the row it hits, `Ctrl` toggles that row, and `Shift` extends
+the marks from the anchor. The engine reports the modifiers with the row's gesture, so the
+picker's row control reports its own `RowGesture` rather than `Change::Activated`, which
+carries none. The marks are the file verbs' set first, so any row is markable in every mode:
+a folder can be deleted while an open mode asks for a file, and a file can be deleted while a
+folder mode asks for a folder. `Space` marks the cursor's row and `Ctrl+D` drops every mark.
+In `SelectFolders` a double click on a folder enters it, which drops the marks: browsing past
+an assembled answer has to stay possible. In every mode a double click on a file commits the
+row it names, whatever else is marked; a folder's double click is always navigation, because
+the two meanings would collide.
 
-`SelectFolder` accepts the folder on screen, as native folder pickers do; a double click on a
-subfolder enters it, and a single click selects it without answering. Save adds the name field
-to the footer, and an empty or path-bearing name disables accept. `SaveFiles` shows how many
-names the request will write instead of a field: the folder is the only thing the user
+`OpenFiles` and `SelectFolders` answer the files or folders in the marks, in row order; the
+rows the mode cannot name are ignored, as Explorer ignores a folder in a multi-selection it is
+asked to open. `SelectFolder` answers the marked folder when exactly one is marked and the
+folder on screen when none is; two marked folders leave the button disabled, because the
+answer would be a guess. A double click on a subfolder enters it, and a single click marks it
+and fills the field. `Ctrl+D` therefore falls back to the folder on screen. A save puts its
+name in the same field, and an empty or path-bearing name disables accept; a plain click on a
+file fills in its name, while a modified click only marks, so a set can be assembled without
+overwriting what the user is typing. `SaveFiles` shows how
+many names the request will write instead of a field: the folder is the only thing the user
 chooses, and the answer is that folder joined with each name. A save's `strict_types` makes
 accept refuse a name the active filter does not match, and `OverwritePolicy::Forbid` refuses
 one that already exists. `Prompt` asks first: accepting a taken name opens the Replace
@@ -342,7 +356,13 @@ answer, not a branch in the picker's build.
 The host path asks for a dialog of the opening surface and gets back a surface id:
 
 ```rust
-let options = PickerOptions::new(listings.clone(), start, ui_widgets_md3::pack_of, env)
+let options = PickerOptions::new(
+    listings.clone(),
+    start,
+    ui_widgets_md3::pack_of,
+    ui_widgets_md3::menu_style_of,
+    env,
+)
     .places(places.to_vec())
     .devices(devices.to_vec())
     .thumbnails(thumbnails)
@@ -368,6 +388,17 @@ and cannot read its opener's env, so the opening app states the appearance once 
 builds the options; an unscoped env means light. The demo follows the system preference
 through `ThemeWatch` and offers a light/dark switch, because both are worth looking at in
 each pack.
+
+`menu_style_of` comes from the same kit and answers the engine's question the same way: the
+rows' context menus are the engine's own panel, and a dialog that ran as its own `App` would
+otherwise paint them in the engine's fixed default. The pair travels together because the
+menu is the pack's material, not the opener's: a picker drawing in Fluent with an MD3 menu
+would be a bug the caller could not see until the menu opened.
+
+The `env` the caller passes also names the language, and its list comes from the platform —
+`Host::languages()`, which reads the system's preferred-UI-language setting — not from the
+process environment, which only a POSIX session populates. The demo asks its host for the
+list before it builds the env.
 
 The bindings are the caller's to install: a surface that opens the picker without
 `Picker::shortcuts()` gets a dialog whose mouse works and whose `Enter` and `Escape` do
@@ -420,7 +451,7 @@ wants a dialog's enter/leave transition puts it on the window, as the modal dial
 │  Downloads│  ▣ report.pdf      2 MB      2 Mar       │
 │  Pictures │  …                                       │
 ├───────────┴──────────────────────────────────────────┤
-│  All files ▾                          Cancel   Open  │  footer
+│  notes.md                All files ▾  Cancel   Open  │  footer
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -431,25 +462,36 @@ wants a dialog's enter/leave transition puts it on the window, as the modal dial
 | header | Name, Size, Modified, right-aligned figures; scrolls sideways and carries the rows' horizontal offset | yes |
 | rows | `row_height` (32 by default), 20 px icon slot, selection fill; or the grid's cells, an 80 px picture over a two-line name | details list and grid; the marks, the pointer's wash and the keyboard's focus ring are three layers, and engine focus stays on the dialog's buttons |
 | choices | the request's extra controls, 44 px, scrolling sideways, unfolded by the footer's toggle | select menus and checkboxes |
-| footer | left half: the save name field or the every-name status; right group: the options toggle, the type menu, Cancel and the accept button | every request filter switchable |
+| files | the running job's batch, or a `SaveFiles` request's names, one card per full path in the list's order, the current item lifted, capped at four cards and scrolling inside them | `Copy`, `Move`, `Delete` and `Link` while they run, and the save-files caption's names |
+| footer | left half: the answer field (a save's name or an open mode's path) or the every-name status; right group: the options toggle, the type menu, Cancel and the accept button | every request filter switchable |
+
+The files band is the dialog saying *which* files, not only how many. It is declared while a
+job runs and in `SaveFiles` mode, its height comes out of the body, and it disappears with
+its job. Each card carries the whole path — one too wide loses its middle, never its file
+name — and the rows are sorted case-insensitively by path so the same batch reads in the same
+order wherever it is shown. A card the job is working on is lifted with the selected wash. The
+band shows four cards and then scrolls; the row window means a thousand names cost the few
+cards on screen.
 
 The footer is two groups. The left group grows, so a field takes all the room a dialog has
 instead of sharing it with the controls; the right group hugs — the filter menu and both
-buttons move as one block against the trailing edge. A save's name field takes focus when the
+buttons move as one block against the trailing edge. A single mode's answer field is what
+takes that room: a save's name, or an open mode's path. A save's field takes focus when the
 dialog opens, as a platform save dialog's does, and draws the engine's insertion caret,
 selection and composition from `caret_for`/`selection_for`/`preedit_for`; a field that only
 declared `text_input` would edit a buffer with no visible insertion point.
 
-Save mode puts the editable name field in the footer's left group; the type menu stays in the
-right group when the request carries filters. It is a container with the engine's
-`text_input` buffer and one `ui_widgets::text::LineEdit` line: the engine owns the caret,
-selection, composition and editing keys and reports the whole buffer as `Change::Text` on the
-field's id, and the model keeps it until accept joins it to the folder on screen. The shared
-line does what a hand-painted `Text` did not — it scrolls a value longer than the field under
-the caret, draws a placeholder, and the field carries the text cursor — and it asks the engine
-for the caret and selection rather than tracking an offset. The same line draws the path and
-search fields, so all three behave alike. `SaveFiles` replaces the field with a caption naming
-the count, because its names come from the request.
+A single mode puts its answer field in the footer's left group — `OpenFile`, `SelectFolder`
+and `SaveFile` alike; the type menu stays in the right group when the request carries
+filters. It is a container with the engine's `text_input` buffer and one
+`ui_widgets::text::LineEdit` line: the engine owns the caret, selection, composition and
+editing keys and reports the whole buffer as `Change::Text` on the field's id. A save's model
+keeps it until accept joins it to the folder on screen; an open mode's accept resolves it to
+the path it names. The shared line does what a hand-painted `Text` did not — it scrolls a
+value longer than the field under the caret, draws a placeholder, and the field carries the
+text cursor — and it asks the engine for the caret and selection rather than tracking an
+offset. The same line draws the path and search fields, so all four behave alike. `SaveFiles`
+replaces the field with a caption naming the count, because its names come from the request.
 
 The name column has a floor of 60 units. A panel narrower than the three columns is not
 allowed to squeeze a name below it: the header and the rows are declared at the content
@@ -568,7 +610,8 @@ A window the picker opens is one of two kinds, and the kind decides its form:
   `OPEN` and `CANCEL` bindings. While one is open, every other list key is dropped: a key
   that is not an answer cannot move the list behind the scrim. A focused button still
   answers itself, because keyboard activation is the engine's and resolves before the app's
-  binding.
+  binding. The two confirmations that act on a set list it above their answers on the same
+  cards as the files band, capped and scrolling.
 - **A reading window is a window, not a panel above the dialog.** Properties and the
   failure list declare `Presentation::Window` and name themselves with
   `Decl::window_title`; the platform opens a modeless window owned by the dialog — an owned
@@ -676,6 +719,8 @@ picker over it, so the same three packs are checked against the same page.
   matches, "Searching…" stands in the empty body until the first batch, and "No matches" takes
   over once the walk ends with nothing found.
 - **Path rejected**: the path field stays open and the footer names the failure.
+- **A job is running**: the files band lists the batch with the current item lifted, the
+  footer says how far it has gone, and the cancel button stops it.
 
 ### What this rules out
 
@@ -1124,6 +1169,52 @@ first candidate is always the numbered one — right for a copy, which must neve
 source's name, and wrong for a create that was given a free name of its own. The create path
 asks `available_name`, which keeps the plain name until something holds it;
 `a_free_name_is_kept_and_a_taken_one_steps_aside` covers both halves.
+
+**The dialog's context menus kept the engine's fixed dark look.** A picker's rows open the
+engine's own menu, and the engine asks the `App` for `MenuStyle`; the dialog's `App` is the
+`Picker`, so the opening app's style never reached it, and `PickerOptions` carried only
+`pack_of` — the pack a widget draws with, not the material its engine menu paints in. The
+engine's default is one dark palette, so the menus stayed dark over a light dialog and ignored
+MD3, Fluent and Glass alike; Fluent and Glass had no engine-menu material at all. `PickerOptions`
+now takes `menu_style_of` beside `pack_of`, `Picker` answers `App::menu_style` from it with the
+appearance on its `env`, and each kit exports a `menu_style_of`: MD3 wraps its token-faithful
+`menu_style`, Fluent maps the menu flyout's brushes and measurements, Glass maps the glass menu's
+shape onto the pack's raised surface. A platform popup has nothing behind it to frost, so the
+Fluent surface is its acrylic stand-in and the glass body becomes that surface. The check is
+visual — `picker_demo` under each pack in both appearances.
+
+**A file operation was reported by its count.** The footer said "Copying 3 of 12" with one
+current name, so which files a job was touching could only be inferred from a number and the
+name it happened to be on, and the permanent-delete and undo-copy questions asked about "these
+3 items" without naming one. The picker now keeps the batch it started with the job, the
+worker reports the item it is on as a path rather than a file name (a name cannot be matched
+to the right card when two folders hold the same one), and the dialog lists the files as cards
+above the footer — sorted case-insensitively by path, the current item lifted, four cards and
+then a scroller — with the same cards in both confirmations and in `SaveFiles` mode. The
+summary line stays: the band says which files, the footer says how far. The rows are windowed,
+so the band costs the same handful of cards for a batch of a thousand. Checked by hand in
+`picker_demo` (copy several files, then a permanent delete); no test pins a card's look, and
+the batch's order is `sort_paths`, which the band and both questions share.
+
+**The mode owned the selection, so four of the six dialogs could mark one row.** The picker is
+also a file manager: cut, copy, delete and rename act on what the user marked, and a save
+dialog is where old files get cleared away. But `is_multi()` gated every gesture — Ctrl click,
+Shift range, drag sweep, `Ctrl+A`, `Space` — so a dialog answering with one path could act on
+one row, and even the two multi modes refused to mark a row their answer could not name, which
+mixed the verbs' set with the answer's.
+
+The selection is now the verbs' set in every mode, and accept reads it through its own
+judgment. `OpenFiles` and `SelectFolders` answer the eligible marks; `OpenFile`, `SelectFolder`
+and `SaveFile` answer the footer's answer field, which a single named mark fills (the folder on
+screen when a folder mode has none), stays empty when two could answer, and the button reports
+as disabled. A typed path answers too — it is resolved against the directory on screen, so the
+dialog can answer with something the listing does not show — and `Enter` on a folder path in an
+open mode enters it. A double click commits the file it names, and `Ctrl+D` drops the marks.
+Checked by hand in `picker_demo`; the model's tests pin the fill rules
+(`a_single_mode_answers_one_mark_and_clears_when_the_set_cannot`,
+`a_folder_mode_answers_the_marked_folder_or_the_folder_on_screen`,
+`a_double_click_commits_the_file_it_names_not_the_marked_set`, and
+`a_typed_path_answers_without_being_on_screen`).
 
 ## See also
 

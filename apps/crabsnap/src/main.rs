@@ -58,7 +58,7 @@ use ui_platform::element::Element;
 use ui_platform::host::{Backend as _, Host, OpenOptions};
 use ui_platform::view::App;
 use ui_platform::window::{
-    Anchor, AutoHide, ExclusiveZone, KeyboardMode, Layer, LayerSpec, SurfaceSpec,
+    Anchor, AutoHide, ColourPolicy, ExclusiveZone, KeyboardMode, Layer, LayerSpec, SurfaceSpec,
 };
 use ui_style::Env;
 use ui_widgets_md3::Md3Kit;
@@ -222,6 +222,8 @@ fn cursor_step(pixels: f32, zoom: f32, dots: f32) -> f32 {
 /// The square a handle draws, and the radius it answers within.
 const HANDLE: f32 = 8.0;
 const HANDLE_REACH: f32 = 7.0;
+/// How much light the freeze overlay hides outside the selection: the old black at 110.
+const DIM: f32 = 110.0 / 255.0;
 
 /// What the press that is currently down is doing.
 enum Gesture {
@@ -2084,7 +2086,16 @@ impl App for Overlay {
             });
         }
 
-        let dim = Color::from_rgba8(0, 0, 0, 110);
+        // The dim is a scrim, not a fill: multiplying codes cannot darken light past the
+        // display's peak, because the display shows that light at the peak either way. Its
+        // hole is the selection, so the inside is not dimmed and the edge is dimmed once.
+        let selection = self.selection(width, height);
+        let dim = ui_core::Decl::container(Id::str("overlay/dim"), NodeKind::Box)
+            .sense(Sense::PASS_THROUGH)
+            .size(SizeClass::fixed(width, height))
+            .scrim(DIM, selection.unwrap_or(Rect::ZERO));
+        // The frame and the handles stay shapes above the dim: a scrim node dims whatever it
+        // covers, and the controls are not part of what is being cut away.
         let mut chrome = ui_core::Decl::container(Id::str("overlay/chrome"), NodeKind::Box)
             .sense(Sense::PASS_THROUGH)
             .size(SizeClass {
@@ -2094,55 +2105,33 @@ impl App for Overlay {
                 grow_y: Grow::Yes,
             });
         let mut shapes = Vec::new();
-        match self.selection(width, height) {
-            Some(rect) => {
-                // Four bands rather than one hole: the paint list has no clip subtraction.
-                shapes.push(band(Rect::new(0.0, 0.0, width, rect.min_y()), dim));
-                shapes.push(band(
-                    Rect::new(0.0, rect.max_y(), width, (height - rect.max_y()).max(0.0)),
-                    dim,
-                ));
-                shapes.push(band(
-                    Rect::new(0.0, rect.min_y(), rect.min_x(), rect.size.h),
-                    dim,
-                ));
-                shapes.push(band(
-                    Rect::new(
-                        rect.max_x(),
-                        rect.min_y(),
-                        (width - rect.max_x()).max(0.0),
-                        rect.size.h,
-                    ),
-                    dim,
-                ));
-                shapes.push(Shape::Rect {
-                    rect,
-                    corners: Corners::ZERO,
-                    fill: Color::from_rgba8(0, 0, 0, 0),
-                    gradient: None,
-                    border: Some((Color::from_rgba8(255, 255, 255, 230), 1.0)),
-                });
-                // A locked selection has nothing to drag: the handles would only promise a
-                // resize that a press no longer performs.
-                if !matches!(self.gesture, Some(Gesture::Select { .. })) && !armed && !claimed {
-                    for handle in Handle::ALL {
-                        let at = handle.at(rect);
-                        shapes.push(Shape::Rect {
-                            rect: Rect::new(
-                                at.x - HANDLE * 0.5,
-                                at.y - HANDLE * 0.5,
-                                HANDLE,
-                                HANDLE,
-                            ),
-                            corners: Corners::all(2.0),
-                            fill: Color::from_rgba8(255, 255, 255, 255),
-                            gradient: None,
-                            border: Some((Color::from_rgba8(20, 20, 20, 200), 1.0)),
-                        });
-                    }
+        if let Some(rect) = selection {
+            shapes.push(Shape::Rect {
+                rect,
+                corners: Corners::ZERO,
+                fill: Color::from_rgba8(0, 0, 0, 0),
+                gradient: None,
+                border: Some((Color::from_rgba8(255, 255, 255, 230), 1.0)),
+            });
+            // A locked selection has nothing to drag: the handles would only promise a
+            // resize that a press no longer performs.
+            if !matches!(self.gesture, Some(Gesture::Select { .. })) && !armed && !claimed {
+                for handle in Handle::ALL {
+                    let at = handle.at(rect);
+                    shapes.push(Shape::Rect {
+                        rect: Rect::new(
+                            at.x - HANDLE * 0.5,
+                            at.y - HANDLE * 0.5,
+                            HANDLE,
+                            HANDLE,
+                        ),
+                        corners: Corners::all(2.0),
+                        fill: Color::from_rgba8(255, 255, 255, 255),
+                        gradient: None,
+                        border: Some((Color::from_rgba8(20, 20, 20, 200), 1.0)),
+                    });
                 }
             }
-            None => shapes.push(band(Rect::new(0.0, 0.0, width, height), dim)),
         }
         chrome.shapes = shapes;
         let mut container = ui_platform::Container::new(root, NodeKind::Stack)
@@ -2176,6 +2165,7 @@ impl App for Overlay {
                     .background_image(MARKS_TEXTURE, ImageFit::Fill),
             );
         }
+        container = container.child_decl(dim);
         container = container.child_decl(chrome);
         // The session's own controls — a mark's box, its handles, the typing field — sit over
         // the marks they belong to, and under the disc and the bar: a press where either of
@@ -2220,11 +2210,15 @@ impl App for Overlay {
                 self.image.height as f32,
             );
             let picture = self.image.crop(whole);
-            let marked = pin::content::window(&picture, &self.document, window);
-            let source = loupe::Source::of_window(
-                &marked,
-                (window.origin.x as i32, window.origin.y as i32),
-            );
+            // A picture with no mark is read in its own packing, so an HDR one keeps the
+            // light a raster would flatten; a mark is an SDR raster of its window.
+            let marked;
+            let source = if self.document.is_empty() {
+                loupe::Source::of_picture(&picture)
+            } else {
+                marked = pin::content::window(&picture, &self.document, window);
+                loupe::Source::of_window(&marked, (window.origin.x as i32, window.origin.y as i32))
+            };
             if let Some(node) = loupe::build(
                 cx,
                 loupe::View {
@@ -2279,7 +2273,7 @@ impl App for Overlay {
                 cx,
                 Id::str("overlay/readout"),
                 rect,
-                dots,
+                self.image.crop_of(rect, dots),
                 surface,
                 cx.rect_of(toolbar::id()),
             )
@@ -2291,16 +2285,6 @@ impl App for Overlay {
         let mut wcx = ui_widgets::Cx::new(cx, Arc::clone(&self.env));
         container = container.child(self.notice.build(&mut wcx, &self.kit, width));
         Box::new(container)
-    }
-}
-
-fn band(rect: Rect, colour: Color) -> Shape {
-    Shape::Rect {
-        rect,
-        corners: Corners::ZERO,
-        fill: colour,
-        gradient: None,
-        border: None,
     }
 }
 
@@ -2639,6 +2623,8 @@ pub(crate) fn overlay_surface(output: Option<&str>) -> SurfaceSpec {
             auto_hide: AutoHide::Cover,
         },
     )
+    // The frozen frame is what the screen showed, HDR included.
+    .with_colour(ColourPolicy::Auto)
 }
 
 /// Wait out `--delay`, giving the user time to arrange what is about to be captured.

@@ -65,6 +65,13 @@ show a blank strip beside it. The panel's own drawing therefore has to fill its
 rect; a card, a border or a shadow inside a framed window would draw a second
 frame.
 
+A surface stands on whole pixels: the platform places its window on them, and glyph tiles are
+authored on the tree's grid. The panel's rect is therefore grown out to that grid — the origin
+down to a grid line and the far edge up to the next — so the window holds every pixel the panel
+painted. A panel anchored at a pointer's pixel centre sits between whole logical units, and its
+text must not; its size is also content-authored and fractional (text advances are not rounded),
+so rounding the extent in either direction would shave the panel's border.
+
 A panel never disappears because a surface could not be opened. A host that
 presents panels says so when it builds the loop
 (`AppLoop::set_panel_surfaces`); until it does, the request is read as `Parent`,
@@ -174,6 +181,26 @@ The strip has no special keyboard mode — `Up`/`Down` walk into it and across i
 and an app that wants Win11's shape puts the run first, above a divider.
 
 ## Corrections
+
+**A panel anchored between pixels painted its text between texels.** A pointer names a pixel
+by its centre, so a menu anchored at a press sits at a whole number plus a half logical unit.
+The surface was painted by cutting the panel out of the tree with a translation of exactly its
+laid-out origin, which shapes follow — their rectangles are transformed as they are pushed.
+Glyphs are not: their tiles had already been rasterized at the tree's absolute phase, and a
+half-pixel translation put every tile between two texels, so each label was sampled across its
+neighbours and read soft. The same menu at an integer anchor was crisp, which is why the blur
+tracked position; the panel's entrance animation also slides by fractions, which is why it was
+first blamed on the animation and on the surface being resampled. The origin is now snapped to
+the grid glyphs are authored on, in the paint rebase and in the popup spec the platform places
+the window and shifts the panel's input by, so all three name the same pixel. The extent needed
+the same treatment: a panel's width comes from its content, and text advances are not rounded, so
+the window's client rounded the far edge down and shaved a sliver off the panel's border. The
+rect is now grown out to the grid — origin down, far edge up — and the window receives that rect.
+Pinned by `a_menu_anchored_between_pixels_gets_a_surface_on_the_pixel_grid` in
+`crates/ui-platform/src/view/tests.rs`; before the origin snap it failed with `a glyph at 17.5
+device px is between texels`, and with the origin rounded to the nearer grid line instead of
+taken down it failed with `a prim at Rect { origin: Point { x: -0.5, y: -0.5 }, .. } falls off
+the .. surface`.
 
 **A flyout's surface stood somewhere the tree did not name.** The menu's flyout is a
 platform panel placed beside its row, but the Win32 backend ran the constraint against the

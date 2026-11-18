@@ -6,7 +6,9 @@
 
 use std::sync::Arc;
 
-use ui_core::colour::{ContentColour, Destination, Placement};
+use ui_core::colour::{
+    ContentColour, Destination, PixelStorage, Placement, f32_to_half, half_to_f32,
+};
 use ui_core::cx::Cx;
 use ui_core::draw::{ImageEntry, ImageSource, Sampling, Shape};
 use ui_core::geom::{Color, Corners, Point, Rect, Size};
@@ -170,7 +172,12 @@ pub(crate) struct Source<'a> {
 }
 
 impl<'a> Source<'a> {
-    /// A window of the picture, `origin` being the picture pixel its first one is: what
+    /// The whole picture, whose first texel is the picture's own corner.
+    pub(crate) fn of_picture(image: &'a Cropped) -> Self {
+        Self::of_window(image, (0, 0))
+    }
+
+    /// A window of the picture, `origin` being the picture pixel its first texel is: what
     /// carries the marks into the disc.
     pub(crate) fn of_window(image: &'a Cropped, origin: (i32, i32)) -> Self {
         Self {
@@ -182,16 +189,21 @@ impl<'a> Source<'a> {
         }
     }
 
-    /// One pixel as straight sRGB8, with the edge repeated past the picture.
-    fn texel(&self, placement: &Placement, x: i32, y: i32) -> [u8; 4] {
+    /// One texel as the picture packs it, with the edge repeated past the picture.
+    fn bytes(&self, x: i32, y: i32) -> Option<&'a [u8]> {
         if self.width == 0 || self.height == 0 {
-            return [0, 0, 0, 255];
+            return None;
         }
         let x = (x - self.origin.0).clamp(0, self.width as i32 - 1) as usize;
         let y = (y - self.origin.1).clamp(0, self.height as i32 - 1) as usize;
         let texel = self.colour.storage.bytes_per_texel();
         let index = (y * self.width as usize + x) * texel;
-        let Some(bytes) = self.data.get(index..index + texel) else {
+        self.data.get(index..index + texel)
+    }
+
+    /// One pixel as straight sRGB8, for the readout and for an SDR disc.
+    fn texel(&self, placement: &Placement, x: i32, y: i32) -> [u8; 4] {
+        let Some(bytes) = self.bytes(x, y) else {
             return [0, 0, 0, 255];
         };
         let [r, g, b, a] = placement.texel(bytes);
@@ -200,10 +212,12 @@ impl<'a> Source<'a> {
     }
 }
 
-/// One baked disc: the texture, and where its window sat in the picture.
+/// One baked disc: the texture, what its texels mean, and where its window sat in the picture.
 pub(crate) struct Disc {
     pub(crate) pixels: Vec<u8>,
     pub(crate) side: u32,
+    /// The packing and light of `pixels`: an HDR picture keeps its own, an SDR one is sRGB8.
+    pub(crate) colour: ContentColour,
     /// Whole texels per source pixel.
     pub(crate) zoom: u32,
     /// The window's top-left in image pixels, and its width in cells.
@@ -220,29 +234,36 @@ pub(crate) struct Disc {
 pub(crate) fn bake(source: &Source<'_>, aim: Aim, zoom: u32, side: u32) -> Disc {
     let side = side.max(1);
     let zoom = zoom.max(1);
-    let placement = source.colour.placement(Destination::SDR);
     // An odd window keeps the aimed cell in the middle; its width follows the disc rather
     // than a division of it, so every zoom draws whole blocks.
     let beside = cells_beside(side, zoom);
     let span = (2 * beside + 1) as i32;
     let (x0, y0) = (aim.pixel.0 - beside as i32, aim.pixel.1 - beside as i32);
-    let mut cells = vec![0u8; (span * span * 4) as usize];
+    let placement = source.colour.placement(Destination::SDR);
+    // Half floats are the picture's own light; a texel copied as it is stays as bright on
+    // the disc as on the pin, where converting to sRGB8 flattened every highlight.
+    let light = source.colour.storage == PixelStorage::Float16;
+    let texel: usize = if light { 8 } else { 4 };
+    let mut cells = vec![0u8; (span * span) as usize * texel];
     for y in 0..span {
         for x in 0..span {
-            let texel = source.texel(&placement, x0 + x, y0 + y);
-            let at = ((y * span + x) * 4) as usize;
-            cells[at..at + 4].copy_from_slice(&texel);
+            let at = (y * span + x) as usize * texel;
+            if light {
+                if let Some(bytes) = source.bytes(x0 + x, y0 + y)
+                    && let Some(slot) = cells.get_mut(at..at + 8)
+                {
+                    slot.copy_from_slice(bytes);
+                }
+            } else if let Some(slot) = cells.get_mut(at..at + 4) {
+                slot.copy_from_slice(&source.texel(&placement, x0 + x, y0 + y));
+            }
         }
     }
-    let centre = span / 2;
-    let aimed = {
-        let at = ((centre * span + centre) * 4) as usize;
-        [cells[at], cells[at + 1], cells[at + 2], cells[at + 3]]
-    };
+    let aimed = source.texel(&placement, aim.pixel.0, aim.pixel.1);
     let radius = side as f32 * 0.5;
     let middle = radius;
     let last = beside as i32;
-    let mut pixels = vec![0u8; (side * side * 4) as usize];
+    let mut pixels = vec![0u8; (side * side) as usize * texel];
     for j in 0..side {
         for i in 0..side {
             let du = (i as f32 + 0.5) - middle;
@@ -253,17 +274,29 @@ pub(crate) fn bake(source: &Source<'_>, aim: Aim, zoom: u32, side: u32) -> Disc 
             }
             let x = cell_at(side, zoom, i).clamp(-last, last) + last;
             let y = cell_at(side, zoom, j).clamp(-last, last) + last;
-            let from = ((y * span + x) * 4) as usize;
-            let to = ((j * side + i) * 4) as usize;
-            pixels[to] = cells[from];
-            pixels[to + 1] = cells[from + 1];
-            pixels[to + 2] = cells[from + 2];
-            pixels[to + 3] = (cells[from + 3] as f32 * coverage).round() as u8;
+            let from = (y * span + x) as usize * texel;
+            let to = (j * side + i) as usize * texel;
+            let Some(cell) = cells.get(from..from + texel) else {
+                continue;
+            };
+            let Some(slot) = pixels.get_mut(to..to + texel) else {
+                continue;
+            };
+            slot.copy_from_slice(cell);
+            if light {
+                let alpha = half_to_f32(u16::from_le_bytes([slot[6], slot[7]]));
+                let faded = f32_to_half(alpha * coverage).to_le_bytes();
+                slot[6] = faded[0];
+                slot[7] = faded[1];
+            } else {
+                slot[3] = (f32::from(slot[3]) * coverage).round() as u8;
+            }
         }
     }
     Disc {
         pixels,
         side,
+        colour: if light { source.colour } else { ContentColour::SDR },
         zoom,
         origin: (x0, y0),
         span,
@@ -510,7 +543,7 @@ pub(crate) fn build(cx: &mut Cx<'_>, view: View<'_>) -> Option<Decl> {
         width: disc.side,
         height: disc.side,
         source: ImageSource::Pixels(Arc::new(disc.pixels.clone())),
-        colour: ContentColour::SDR,
+        colour: disc.colour,
         sampling: Sampling::Pixelated,
     });
 
@@ -627,6 +660,49 @@ mod tests {
             disc.aim,
             [100, 100, 40, 255],
             "the pill states the same pixel"
+        );
+    }
+
+    /// A half-float picture is copied, not converted: a highlight the pin shows above white
+    /// must stay above it on the disc, which is the whole point of magnifying it.
+    #[test]
+    fn a_light_picture_keeps_its_highlights_on_the_disc() {
+        let mut data = Vec::new();
+        for _ in 0..9 {
+            for value in [3.0f32, 1.5, 0.0, 1.0] {
+                data.extend_from_slice(&f32_to_half(value).to_le_bytes());
+            }
+        }
+        let image = Image {
+            width: 3,
+            height: 3,
+            data: Arc::new(data),
+            colour: ContentColour::scrgb(470.0),
+            scale: 1.0,
+            light: crate::capture::Light::sdr(),
+        };
+        let source = source(&image);
+        let disc = bake(&source, Aim::at(Point::new(1.0, 1.0)), 8, 120);
+        assert_eq!(disc.colour.storage, PixelStorage::Float16);
+        let middle = disc.side / 2;
+        let channel = |at: usize| {
+            half_to_f32(u16::from_le_bytes([
+                disc.pixels[at],
+                disc.pixels[at + 1],
+            ]))
+        };
+        let centre = ((middle * disc.side + middle) * 8) as usize;
+        assert_eq!(channel(centre), 3.0, "light above SDR white survives the bake");
+        assert_eq!(channel(centre + 2), 1.5);
+        assert_eq!(channel(centre + 6), 1.0);
+        assert_eq!(channel(6), 0.0, "the corner is outside the circle");
+        assert!(
+            (0..middle as usize).any(|k| {
+                let at = ((k * disc.side as usize + k) * 8) + 6;
+                let alpha = channel(at);
+                alpha > 0.0 && alpha < 1.0
+            }),
+            "the rim fades the light's alpha, not its colour"
         );
     }
 

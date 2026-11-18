@@ -1,7 +1,7 @@
 //! The two pills that state a selection: where it starts and how large it is.
 //!
 //! Both count the frozen frame's own pixels, because that is what `Save` writes; the
-//! overlay's geometry is in surface points and at 2× the two differ by two.
+//! numbers are the crop's own bounds, so the pill and the file never disagree.
 //!
 //! Placement is the legacy project's fallback chain (`src/ui/chrome/mod.rs:637-675` there),
 //! with the action bar as the obstacle the pills must not hide under.
@@ -14,13 +14,12 @@ use crate::pill;
 /// Where a pill may sit: above the corner, beside it, below, then inside.
 const EDGE: f32 = 2.0;
 
-/// The origin and the size, in image pixels.
-pub(crate) fn labels(rect: Rect, dots: f32) -> [String; 2] {
-    let origin = Point::new((rect.min_x() * dots).round(), (rect.min_y() * dots).round());
-    let size = Size::new((rect.size.w * dots).round(), (rect.size.h * dots).round());
+/// The origin and the size, in image pixels, of the pixels the crop takes.
+pub(crate) fn labels(bounds: (u32, u32, u32, u32)) -> [String; 2] {
+    let (x0, y0, x1, y1) = bounds;
     [
-        format!("{}, {}", origin.x as i64, origin.y as i64),
-        format!("{} × {}", size.w as i64, size.h as i64),
+        format!("{x0}, {y0}"),
+        format!("{} × {}", x1 - x0, y1 - y0),
     ]
 }
 
@@ -62,11 +61,11 @@ pub(crate) fn build(
     cx: &ui_core::cx::Cx<'_>,
     id: Id,
     selection: Rect,
-    dots: f32,
+    bounds: (u32, u32, u32, u32),
     surface: Rect,
     avoid: Option<Rect>,
 ) -> Option<Decl> {
-    let labels = labels(selection, dots);
+    let labels = labels(bounds);
     let size = pill::measure(cx, &labels)?;
     let at = place(size, selection, surface, avoid);
     Some(pill::row(id, &labels).offset(at.x, at.y))

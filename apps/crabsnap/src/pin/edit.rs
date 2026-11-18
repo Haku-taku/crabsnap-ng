@@ -724,13 +724,16 @@ impl Session {
         });
         let surface = Rect::new(0.0, 0.0, cx.width() as f32, cx.height() as f32);
         // The disc shows the picture with the marks in it, so it reads a raster of both:
-        // the window is a few cells, not the picture.
+        // the window is a few cells, not the picture. With no mark, the picture is read in
+        // its own packing, and an HDR one keeps the light a raster would flatten.
         let window = loupe::window(cx.scale(), aim, self.loupe.zoom());
-        let marked = super::content::window(image, document, window);
-        let source = loupe::Source::of_window(
-            &marked,
-            (window.origin.x as i32, window.origin.y as i32),
-        );
+        let marked;
+        let source = if document.is_empty() {
+            loupe::Source::of_picture(image)
+        } else {
+            marked = super::content::window(image, document, window);
+            loupe::Source::of_window(&marked, (window.origin.x as i32, window.origin.y as i32))
+        };
         loupe::build(
             cx,
             loupe::View {

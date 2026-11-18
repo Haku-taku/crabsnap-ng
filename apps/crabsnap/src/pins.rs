@@ -15,7 +15,7 @@ use ui_core::geom::{Insets, Point};
 use ui_platform::SurfaceId;
 use ui_platform::host::{MessageCtx, OpenOptions};
 use ui_platform::window::{
-    Anchor, AutoHide, ExclusiveZone, KeyboardMode, Layer, LayerSpec, SurfaceSpec,
+    Anchor, AutoHide, ColourPolicy, ExclusiveZone, KeyboardMode, Layer, LayerSpec, SurfaceSpec,
 };
 
 use crate::codec::Codecs;
@@ -77,6 +77,8 @@ pub(crate) fn canvas_surface(screen: (u32, u32), output: Option<&str>) -> Surfac
             auto_hide: AutoHide::Yield,
         },
     )
+    // A canvas holds captured pictures, and an HDR capture must keep its light.
+    .with_colour(ColourPolicy::Auto)
 }
 
 /// The pins of every canvas this process opened, for answers that own no surface.
